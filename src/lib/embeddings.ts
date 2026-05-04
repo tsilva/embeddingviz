@@ -1,7 +1,6 @@
 import { AutoModelForCausalLM, AutoTokenizer, env, pipeline, type ProgressInfo } from "@huggingface/transformers";
-import type { EmbeddingPoint, InputType, ModelPreset, OutputMode, PipelineStatus, TextSnippet } from "../types";
-import { GROUP_COLORS } from "../data";
-import { projectPca } from "./pca";
+import type { EmbeddingPoint, InputType, ModelPreset, OutputMode, PipelineStatus, ReductionMethod, TextSnippet } from "../types";
+import { projectReduction } from "./reductions";
 
 env.allowRemoteModels = true;
 env.allowLocalModels = false;
@@ -33,6 +32,7 @@ export async function createEmbeddingRun({
   model,
   outputMode,
   inputType,
+  reduction,
   snippets,
   files,
   onStatus,
@@ -40,6 +40,7 @@ export async function createEmbeddingRun({
   model: ModelPreset;
   outputMode: OutputMode;
   inputType: InputType;
+  reduction: ReductionMethod;
   snippets: TextSnippet[];
   files: File[];
   onStatus: (status: PipelineStatus) => void;
@@ -54,8 +55,7 @@ export async function createEmbeddingRun({
   onStatus({ phase: "embedding", message: "Extracting embeddings", progress: 0.55 });
   const vectors = await extractVectors(model, samples, inputType, outputMode, onStatus);
 
-  onStatus({ phase: "projecting", message: "Projecting with PCA", progress: 0.82 });
-  const projection = projectPca(vectors, 3);
+  const projection = await projectReduction(vectors, reduction, onStatus);
 
   const points: EmbeddingPoint[] = samples.map((sample, index) => ({
     id: `${Date.now()}-${index}`,
@@ -75,7 +75,7 @@ export async function createEmbeddingRun({
 
   onStatus({
     phase: "ready",
-    message: `Model loaded · ${points.length} embeddings · PCA projected`,
+    message: `Model loaded · ${points.length} embeddings · ${reduction} projected`,
     progress: 1,
   });
 
@@ -388,8 +388,4 @@ function trimText(value: string, maxLength: number) {
 
 export function runColor(index: number) {
   return ["#2563eb", "#f59e0b", "#f43f72", "#14b8a6", "#7c3aed"][index % 5];
-}
-
-export function colorForGroup(group: string) {
-  return GROUP_COLORS[group] ?? "#64748b";
 }

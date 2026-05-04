@@ -6,7 +6,6 @@ import {
   Database,
   FileText,
   Image,
-  Layers,
   Loader2,
   Play,
   Plus,
@@ -44,6 +43,7 @@ function App() {
     [runs, selectedPointId],
   );
   const totalVisible = runs.filter((run) => run.visible).reduce((sum, run) => sum + run.count, 0);
+  const effectiveInputType = outputMode === "tokens" ? "tokens" : inputType;
 
   async function handleRun() {
     try {
@@ -51,7 +51,8 @@ function App() {
       const result = await createEmbeddingRun({
         model,
         outputMode,
-        inputType,
+        inputType: effectiveInputType,
+        reduction,
         snippets,
         files,
         onStatus: setStatus,
@@ -60,8 +61,10 @@ function App() {
       const runIndex = runs.length;
       const run: RunRecord = {
         id: `${Date.now()}`,
-        name: runName(inputType),
+        name: runName(effectiveInputType),
+        model: model.label,
         output: outputLabel(outputMode, model.task),
+        reduction,
         color: runColor(runIndex),
         count: result.points.length,
         current: true,
@@ -124,9 +127,6 @@ function App() {
 
   function chooseOutputMode(nextOutputMode: OutputMode) {
     setOutputMode(nextOutputMode);
-    if (nextOutputMode === "tokens") {
-      setInputType("tokens");
-    }
   }
 
   return (
@@ -203,65 +203,67 @@ function App() {
             </p>
           </section>
 
-          <section className="controlSection">
-            <div className="fieldRow">
-              <span className="fieldLabel">Input type</span>
-            </div>
-            <div className="segmented">
-              <button className={inputType === "text" ? "active" : ""} type="button" onClick={() => chooseInputType("text")}>
-                <Type size={15} />
-                Text
-              </button>
-              <button className={inputType === "files" ? "active" : ""} type="button" onClick={() => chooseInputType("files")}>
-                <FileText size={15} />
-                Files
-              </button>
-              <button className={inputType === "images" ? "active" : ""} type="button" onClick={() => chooseInputType("images")}>
-                <Image size={15} />
-                Images
-              </button>
-              <button className={inputType === "tokens" ? "active" : ""} type="button" onClick={() => chooseInputType("tokens")}>
-                <Layers size={15} />
-                Tokens
-              </button>
-            </div>
-
-            {inputType === "text" ? (
-              <div className="snippetList">
-                <div className="fieldRow">
-                  <span className="subLabel">Text snippets</span>
-                  <span className="counter">{snippets.length} / 100</span>
-                </div>
-                {snippets.map((snippet) => (
-                  <div className="snippetItem" key={snippet.id}>
-                    <input value={snippet.text} onChange={(event) => updateSnippet(snippet.id, "text", event.target.value)} aria-label="Snippet text" />
-                    <button type="button" title="Remove snippet" onClick={() => removeSnippet(snippet.id)}>
-                      <X size={15} />
-                    </button>
-                  </div>
-                ))}
-                <button className="addButton" type="button" onClick={addSnippet}>
-                  <Plus size={16} />
-                  Add snippet
+          {outputMode === "tokens" ? (
+            <section className="controlSection">
+              <span className="fieldLabel">Token table</span>
+              <p className="notice tokenModeNotice">Plots the tokenizer vocabulary with a WebGL point layer.</p>
+            </section>
+          ) : (
+            <section className="controlSection">
+              <div className="fieldRow">
+                <span className="fieldLabel">Input type</span>
+              </div>
+              <div className="segmented">
+                <button className={inputType === "text" ? "active" : ""} type="button" onClick={() => chooseInputType("text")}>
+                  <Type size={15} />
+                  Text
+                </button>
+                <button className={inputType === "files" ? "active" : ""} type="button" onClick={() => chooseInputType("files")}>
+                  <FileText size={15} />
+                  Files
+                </button>
+                <button className={inputType === "images" ? "active" : ""} type="button" onClick={() => chooseInputType("images")}>
+                  <Image size={15} />
+                  Images
                 </button>
               </div>
-            ) : null}
 
-            {inputType === "files" ? (
-              <div className="fileDrop">
-                <input
-                  type="file"
-                  multiple
-                  accept=".txt,.md,.csv,.json"
-                  onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
-                />
-                <span>{files.length ? `${files.length} files selected` : "Choose text files"}</span>
-              </div>
-            ) : null}
+              {inputType === "text" ? (
+                <div className="snippetList">
+                  <div className="fieldRow">
+                    <span className="subLabel">Text snippets</span>
+                    <span className="counter">{snippets.length} / 100</span>
+                  </div>
+                  {snippets.map((snippet) => (
+                    <div className="snippetItem" key={snippet.id}>
+                      <input value={snippet.text} onChange={(event) => updateSnippet(snippet.id, "text", event.target.value)} aria-label="Snippet text" />
+                      <button type="button" title="Remove snippet" onClick={() => removeSnippet(snippet.id)}>
+                        <X size={15} />
+                      </button>
+                    </div>
+                  ))}
+                  <button className="addButton" type="button" onClick={addSnippet}>
+                    <Plus size={16} />
+                    Add snippet
+                  </button>
+                </div>
+              ) : null}
 
-            {inputType === "images" ? <p className="notice">Image inputs require an image-feature-extraction model.</p> : null}
-            {inputType === "tokens" ? <p className="notice">Plots the tokenizer vocabulary with a WebGL point layer.</p> : null}
-          </section>
+              {inputType === "files" ? (
+                <div className="fileDrop">
+                  <input
+                    type="file"
+                    multiple
+                    accept=".txt,.md,.csv,.json"
+                    onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+                  />
+                  <span>{files.length ? `${files.length} files selected` : "Choose text files"}</span>
+                </div>
+              ) : null}
+
+              {inputType === "images" ? <p className="notice">Image inputs require an image-feature-extraction model.</p> : null}
+            </section>
+          )}
 
           <section className="controlSection">
             <span className="fieldLabel">Reduction</span>
@@ -272,7 +274,7 @@ function App() {
                   className={reduction === method ? "active" : ""}
                   type="button"
                   onClick={() => setReduction(method)}
-                  title={method === "PCA" ? "Available now" : "PCA fallback is used in this MVP"}
+                  title={`Project with ${method}`}
                 >
                   {method}
                 </button>
@@ -286,6 +288,7 @@ function App() {
           selectedPointId={selectedPointId}
           query={query}
           is3d={is3d}
+          primaryReduction={runs[0]?.reduction ?? reduction}
           onQueryChange={setQuery}
           onPointSelect={(point: EmbeddingPoint) => setSelectedPointId(point.id)}
           onToggle3d={setIs3d}
@@ -311,8 +314,8 @@ function App() {
                 <span className="swatch" style={{ backgroundColor: run.color }} />
                 <div>
                   <strong>{run.name}</strong>
-                  <span>{run.output}</span>
-                  <small>{run.count} points</small>
+                  <span>{run.output} · {run.reduction}</span>
+                  <small>{run.model} · {run.count} points</small>
                 </div>
                 <label className="checkbox">
                   <input type="checkbox" checked={run.visible} onChange={() => toggleRunVisibility(run.id)} />
@@ -350,7 +353,7 @@ function App() {
           <span>{status.message}</span>
         </div>
         <div className="statusSegment">{totalVisible} visible points</div>
-        <div className="statusSegment">{reduction === "PCA" ? "PCA projected" : `${reduction} selected · PCA fallback`}</div>
+        <div className="statusSegment">{runs[0]?.reduction ?? reduction} projected</div>
       </footer>
     </div>
   );

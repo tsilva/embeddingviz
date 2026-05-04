@@ -28,7 +28,9 @@ export interface EmbeddingPoint {
 export interface RunRecord {
   id: string;
   name: string;
+  model: string;
   output: string;
+  reduction: ReductionMethod;
   color: string;
   count: number;
   current?: boolean;

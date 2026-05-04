@@ -4,7 +4,7 @@ export interface ProjectionResult {
 }
 
 const EPSILON = 1e-9;
-type VectorRow = ArrayLike<number>;
+export type VectorRow = ArrayLike<number>;
 
 export function projectPca(vectors: VectorRow[], dimensions = 3): ProjectionResult {
   if (vectors.length === 0) {
@@ -102,7 +102,7 @@ function normalize(vector: number[]) {
   return vector.map((value) => value / magnitude);
 }
 
-function normalizeCoordinates(coordinates: Array<[number, number, number]>) {
+export function normalizeCoordinates(coordinates: Array<[number, number, number]>) {
   let maxAbs = EPSILON;
   for (const [x, y, z] of coordinates) {
     maxAbs = Math.max(maxAbs, Math.abs(x), Math.abs(y), Math.abs(z));
