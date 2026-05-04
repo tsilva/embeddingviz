@@ -1,0 +1,737 @@
+:root {
+  color-scheme: light;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f8fafc;
+  color: #0f172a;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --panel-soft: #fbfdff;
+  --border: #dce3ec;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --muted: #64748b;
+  --faint: #94a3b8;
+  --blue: #2563eb;
+  --blue-soft: #eff6ff;
+  --teal: #14b8a6;
+  --amber: #f59e0b;
+  --rose: #f43f72;
+  --green: #16a34a;
+  --shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1180px;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.appShell {
+  display: grid;
+  min-height: 100vh;
+  grid-template-rows: 62px minmax(0, 1fr) 76px;
+  background: #f8fafc;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0 16px 0 20px;
+  backdrop-filter: blur(12px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 210px;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.brandMark {
+  display: grid;
+  grid-template-columns: repeat(3, 5px);
+  gap: 5px;
+  width: 26px;
+}
+
+.brandMark span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #111827;
+}
+
+.runtimeChip,
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  padding: 0 12px;
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.statusPill {
+  margin-left: auto;
+  color: var(--green);
+}
+
+.statusPill.error {
+  color: var(--rose);
+}
+
+.runButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  min-width: 116px;
+  justify-content: center;
+  border: 1px solid #1d4ed8;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #2f79ff 0%, #1d5fe9 100%);
+  color: white;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.24);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.runButton:disabled {
+  opacity: 0.72;
+  cursor: progress;
+}
+
+.workspace {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: 345px minmax(640px, 1fr) 344px;
+}
+
+.leftPanel,
+.rightPanel {
+  overflow: auto;
+  background: var(--panel);
+}
+
+.leftPanel {
+  border-right: 1px solid var(--border);
+  padding: 20px 21px;
+}
+
+.rightPanel {
+  border-left: 1px solid var(--border);
+  padding: 22px 20px;
+}
+
+.controlSection {
+  border-bottom: 1px solid var(--border);
+  padding: 0 0 20px;
+  margin: 0 0 20px;
+}
+
+.controlSection:last-child {
+  border-bottom: 0;
+}
+
+.fieldLabel,
+.subLabel {
+  display: block;
+  margin-bottom: 10px;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.counter,
+.muted,
+.notice {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.notice {
+  margin: 12px 0 0;
+  line-height: 1.45;
+}
+
+.selectShell {
+  position: relative;
+}
+
+.selectShell select,
+.selectControl select,
+.snippetItem input {
+  width: 100%;
+  height: 39px;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: #111827;
+  outline: none;
+  padding: 0 38px 0 13px;
+  font-size: 14px;
+}
+
+.selectShell select:focus,
+.selectControl select:focus,
+.snippetItem input:focus,
+.searchBox input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.selectShell svg {
+  position: absolute;
+  top: 11px;
+  right: 12px;
+  color: #475569;
+  pointer-events: none;
+}
+
+.compatLine,
+.recommend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.compatLine span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+.recommend {
+  color: #10b981;
+}
+
+.segmented {
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 37px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.segmented button:last-child {
+  border-right: 0;
+}
+
+.segmented button.active {
+  background: var(--blue-soft);
+  box-shadow: inset 0 0 0 1px var(--blue);
+  color: var(--blue);
+}
+
+.segmented.small {
+  width: 112px;
+}
+
+.snippetList {
+  margin-top: 18px;
+}
+
+.snippetItem {
+  display: grid;
+  grid-template-columns: 1fr 32px;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.snippetItem input {
+  padding-right: 10px;
+}
+
+.snippetItem button,
+.addButton,
+.panelHeader button,
+.iconGroup button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+}
+
+.snippetItem button {
+  height: 39px;
+}
+
+.addButton {
+  gap: 8px;
+  height: 36px;
+  margin-top: 12px;
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fileDrop {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 106px;
+  margin-top: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fileDrop input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.plotRegion {
+  min-width: 0;
+  overflow: hidden;
+  background: #fff;
+  padding: 24px 22px 18px;
+}
+
+.plotToolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  margin-bottom: 12px;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 220px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  padding: 0 11px;
+  color: #475569;
+}
+
+.searchBox input {
+  width: 100%;
+  border: 0;
+  outline: none;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.iconGroup {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.iconGroup button {
+  width: 38px;
+  height: 38px;
+}
+
+.colorBy {
+  display: grid;
+  gap: 5px;
+  width: 160px;
+  margin-left: auto;
+}
+
+.colorBy span {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.selectControl select {
+  height: 35px;
+  padding-right: 12px;
+}
+
+.plotCanvas {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 216px);
+  min-height: 565px;
+  border-radius: 4px;
+  background:
+    linear-gradient(#fff, #fff),
+    radial-gradient(circle at 50% 50%, rgba(37, 99, 235, 0.05), transparent 56%);
+}
+
+.plotCanvas svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.gridLine {
+  stroke: #e8edf4;
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+
+.axisLine {
+  stroke: #d9e1ec;
+  stroke-width: 1.2;
+}
+
+.axisTick,
+.axisLabel {
+  fill: #475569;
+  font-size: 12px;
+}
+
+.axisLabel {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.point {
+  cursor: pointer;
+  opacity: 0.88;
+  stroke: #fff;
+  stroke-width: 1.4;
+  transition: r 0.15s ease, opacity 0.15s ease;
+}
+
+.point:hover,
+.point.selected {
+  opacity: 1;
+  stroke: #0f172a;
+  stroke-width: 1.6;
+}
+
+.pointLabel {
+  fill: #111827;
+  font-size: 12px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.tooltipPanel {
+  fill: #fff;
+  stroke: #d6dee9;
+}
+
+.tooltipTitle {
+  fill: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.tooltipKey {
+  fill: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tooltipValue {
+  fill: #0f172a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tooltipBadge {
+  fill: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.emptyPlot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.panelHeader h2,
+.selectedPanel h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.panelHeader button {
+  gap: 7px;
+  height: 32px;
+  padding: 0 10px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.runsList {
+  display: grid;
+  gap: 11px;
+}
+
+.emptyRuns {
+  display: flex;
+  align-items: center;
+  min-height: 84px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.runCard {
+  display: grid;
+  grid-template-columns: 13px 1fr 28px;
+  gap: 11px;
+  align-items: start;
+  min-height: 80px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px 12px;
+}
+
+.runCard.current {
+  border-color: var(--blue);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.2);
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  border-radius: 50%;
+}
+
+.runCard strong {
+  display: block;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.runCard span:not(.swatch) {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.runCard small {
+  display: block;
+  margin-top: 10px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.checkbox {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+}
+
+.checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
+.selectedPanel {
+  margin: 28px -20px 0;
+  border-top: 1px solid var(--border);
+  padding: 22px 20px 0;
+}
+
+.selectedPanel h2 {
+  margin-bottom: 22px;
+}
+
+.selectedPanel strong {
+  display: block;
+  margin: 8px 0 8px;
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.selectedPanel p {
+  margin: 6px 0 20px;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.metaLabel {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.statusBar {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.15fr 0.8fr 1fr;
+  align-items: center;
+  gap: 0;
+  border-top: 1px solid var(--border);
+  background: #fff;
+  margin: 0;
+  padding: 16px 20px 18px;
+}
+
+.statusSegment {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 38px;
+  border-right: 1px solid var(--border);
+  padding: 0 30px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.statusSegment:first-child {
+  padding-left: 0;
+}
+
+.statusSegment:last-of-type {
+  border-right: 0;
+}
+
+.statusSegment svg {
+  color: var(--green);
+}
+
+.progressTrack {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 10px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef2f7;
+}
+
+.progressTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #14b8a6);
+  transition: width 0.25s ease;
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1240px) {
+  body {
+    min-width: 1000px;
+  }
+
+  .workspace {
+    grid-template-columns: 310px minmax(520px, 1fr) 300px;
+  }
+
+  .runtimeChip {
+    display: none;
+  }
+
+  .plotToolbar {
+    flex-wrap: wrap;
+    height: auto;
+  }
+
+  .colorBy {
+    margin-left: 0;
+  }
+}
