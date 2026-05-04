@@ -8,6 +8,7 @@ interface ScatterPlotProps {
   query: string;
   is3d: boolean;
   primaryReduction: ReductionMethod;
+  neighborhoodPointIds: Set<string> | null;
   onQueryChange: (query: string) => void;
   onPointSelect: (point: EmbeddingPoint) => void;
   onToggle3d: (enabled: boolean) => void;
@@ -49,6 +50,7 @@ export function ScatterPlot({
   query,
   is3d,
   primaryReduction,
+  neighborhoodPointIds,
   onQueryChange,
   onPointSelect,
   onToggle3d,
@@ -64,10 +66,11 @@ export function ScatterPlot({
   const filtered = useMemo(() => {
     const normalizedQuery = query.toLowerCase();
     return points.filter(({ point }) => {
+      if (neighborhoodPointIds && !neighborhoodPointIds.has(point.id)) return false;
       const target = `${point.label} ${point.snippet} ${point.source}`.toLowerCase();
       return target.includes(normalizedQuery);
     });
-  }, [points, query]);
+  }, [neighborhoodPointIds, points, query]);
 
   const projected = useMemo(
     () =>
@@ -109,8 +112,8 @@ export function ScatterPlot({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    renderWebGlPoints(canvas, projected, selected?.point.id ?? null);
-  }, [projected, selected?.point.id]);
+    renderWebGlPoints(canvas, projected, selected?.point.id ?? null, neighborhoodPointIds);
+  }, [neighborhoodPointIds, projected, selected?.point.id]);
 
   function handleZoomIn() {
     setView((current) => zoomAt(current, ZOOM_STEP, CENTER_X, CENTER_Y));
@@ -216,6 +219,7 @@ export function ScatterPlot({
           width={WIDTH}
           height={HEIGHT}
           aria-label={`2D ${primaryReduction} point cloud`}
+          data-testid="point-cloud-canvas"
           onWheel={handleCanvasWheel}
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
@@ -315,16 +319,21 @@ function SelectedPointOverlay({ selected, axisPrefix }: { selected: ProjectedPoi
   );
 }
 
-function renderWebGlPoints(canvas: HTMLCanvasElement, points: ProjectedPoint[], selectedPointId: string | null) {
+function renderWebGlPoints(
+  canvas: HTMLCanvasElement,
+  points: ProjectedPoint[],
+  selectedPointId: string | null,
+  neighborhoodPointIds: Set<string> | null,
+) {
   const gl = canvas.getContext("webgl", { antialias: true });
   if (!gl) {
-    renderCanvasPoints(canvas, points, selectedPointId);
+    renderCanvasPoints(canvas, points, selectedPointId, neighborhoodPointIds);
     return;
   }
 
   const program = createProgram(gl);
   if (!program) {
-    renderCanvasPoints(canvas, points, selectedPointId);
+    renderCanvasPoints(canvas, points, selectedPointId, neighborhoodPointIds);
     return;
   }
 
@@ -342,7 +351,7 @@ function renderWebGlPoints(canvas: HTMLCanvasElement, points: ProjectedPoint[], 
     vertices[offset + 2] = rgb[0];
     vertices[offset + 3] = rgb[1];
     vertices[offset + 4] = rgb[2];
-    vertices[offset + 5] = point.id === selectedPointId ? 1 : 0;
+    vertices[offset + 5] = point.id === selectedPointId ? 1 : neighborhoodPointIds?.has(point.id) ? 0.55 : 0;
   });
 
   const buffer = gl.createBuffer();
@@ -370,15 +379,15 @@ function createProgram(gl: WebGLRenderingContext) {
     `
       attribute vec2 a_position;
       attribute vec3 a_color;
-      attribute float a_selected;
+      attribute float a_focus;
       varying vec3 v_color;
-      varying float v_selected;
+      varying float v_focus;
 
       void main() {
         v_color = a_color;
-        v_selected = a_selected;
+        v_focus = a_focus;
         gl_Position = vec4(a_position, 0.0, 1.0);
-        gl_PointSize = mix(2.0, 10.0, a_selected);
+        gl_PointSize = mix(2.0, 10.0, v_focus);
       }
     `,
   );
@@ -388,14 +397,14 @@ function createProgram(gl: WebGLRenderingContext) {
     `
       precision mediump float;
       varying vec3 v_color;
-      varying float v_selected;
+      varying float v_focus;
 
       void main() {
         vec2 delta = gl_PointCoord - vec2(0.5);
         float dist = length(delta);
         if (dist > 0.5) discard;
         float alpha = smoothstep(0.5, 0.32, dist);
-        vec3 color = mix(v_color, vec3(0.06, 0.09, 0.16), v_selected * 0.35);
+        vec3 color = mix(v_color, vec3(0.06, 0.09, 0.16), v_focus * 0.35);
         gl_FragColor = vec4(color, alpha * 0.88);
       }
     `,
@@ -417,7 +426,7 @@ function createProgram(gl: WebGLRenderingContext) {
     program,
     position: gl.getAttribLocation(program, "a_position"),
     color: gl.getAttribLocation(program, "a_color"),
-    selected: gl.getAttribLocation(program, "a_selected"),
+    selected: gl.getAttribLocation(program, "a_focus"),
   };
 }
 
@@ -429,17 +438,23 @@ function compileShader(gl: WebGLRenderingContext, type: number, source: string) 
   return gl.getShaderParameter(shader, gl.COMPILE_STATUS) ? shader : null;
 }
 
-function renderCanvasPoints(canvas: HTMLCanvasElement, points: ProjectedPoint[], selectedPointId: string | null) {
+function renderCanvasPoints(
+  canvas: HTMLCanvasElement,
+  points: ProjectedPoint[],
+  selectedPointId: string | null,
+  neighborhoodPointIds: Set<string> | null,
+) {
   const context = canvas.getContext("2d");
   if (!context) return;
 
   context.clearRect(0, 0, canvas.width, canvas.height);
   for (const { point, color, cx, cy } of points) {
     const selected = point.id === selectedPointId;
+    const neighbor = !selected && neighborhoodPointIds?.has(point.id);
     context.beginPath();
-    context.arc(cx, cy, selected ? 5 : 1.5, 0, Math.PI * 2);
+    context.arc(cx, cy, selected ? 5 : neighbor ? 3.2 : 1.5, 0, Math.PI * 2);
     context.fillStyle = selected ? "#0f172a" : color;
-    context.globalAlpha = selected ? 1 : 0.85;
+    context.globalAlpha = selected || neighbor ? 1 : 0.85;
     context.fill();
   }
   context.globalAlpha = 1;

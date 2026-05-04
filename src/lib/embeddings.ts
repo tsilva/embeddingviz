@@ -1,4 +1,4 @@
-import { AutoModelForCausalLM, AutoTokenizer, env, pipeline, type ProgressInfo } from "@huggingface/transformers";
+import type { ProgressInfo } from "@huggingface/transformers";
 import type {
   EmbeddingInputPlan,
   EmbeddingPoint,
@@ -11,18 +11,23 @@ import type {
   ReductionMethod,
   TextSnippet,
 } from "../types";
-import { projectReduction } from "./reductions";
 
-env.allowRemoteModels = true;
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-
-type FeatureExtractor = Awaited<ReturnType<typeof pipeline<"feature-extraction">>>;
-type CausalLmBundle = {
-  tokenizer: Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>;
-  model: Awaited<ReturnType<typeof AutoModelForCausalLM.from_pretrained>>;
+type TransformersModule = typeof import("@huggingface/transformers");
+type FeatureExtractor = (texts: string[], options: { pooling: string; normalize: boolean }) => Promise<{ tolist(): unknown }>;
+type Tokenizer = {
+  encode: (text: string, options?: { add_special_tokens?: boolean }) => number[];
+  decode: (ids: number[], options?: { skip_special_tokens?: boolean }) => string;
+  get_vocab: () => Map<string, number>;
+  (texts: string[], options: { padding: boolean; truncation: boolean; max_length: number }): {
+    attention_mask?: { data: ArrayLike<number | bigint>; dims: number[] };
+    [key: string]: unknown;
+  };
 };
-type Tokenizer = Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>;
+type CausalLmModel = (inputs: ReturnType<Tokenizer>) => Promise<Record<string, { data: ArrayLike<number>; dims: number[] } | unknown>>;
+type CausalLmBundle = {
+  tokenizer: Tokenizer;
+  model: CausalLmModel;
+};
 const MAX_TOKEN_POINTS = 50000;
 const CHUNK_OVERLAP_TOKENS = 24;
 
@@ -44,6 +49,20 @@ interface ResolvedSample {
 const extractorCache = new Map<string, Promise<FeatureExtractor>>();
 const causalLmCache = new Map<string, Promise<CausalLmBundle>>();
 const tokenizerCache = new Map<string, Promise<Tokenizer>>();
+let transformersPromise: Promise<TransformersModule> | null = null;
+
+async function loadTransformers() {
+  if (!transformersPromise) {
+    transformersPromise = import("@huggingface/transformers").then((transformers) => {
+      transformers.env.allowRemoteModels = true;
+      transformers.env.allowLocalModels = false;
+      transformers.env.useBrowserCache = true;
+      return transformers;
+    });
+  }
+
+  return transformersPromise;
+}
 
 export async function createEmbeddingRun({
   model,
@@ -76,6 +95,7 @@ export async function createEmbeddingRun({
   onStatus({ phase: "embedding", message: "Extracting embeddings", progress: 0.55 });
   const vectors = await extractVectors(model, samples, inputType, outputMode, onStatus);
 
+  const { projectReduction } = await import("./reductions");
   const projection = await projectReduction(vectors, reduction, onStatus);
 
   const points: EmbeddingPoint[] = samples.map((sample, index) => ({
@@ -115,19 +135,21 @@ async function getExtractor(modelId: string, onStatus: (status: PipelineStatus) 
   if (!extractorCache.has(modelId)) {
     extractorCache.set(
       modelId,
-      pipeline("feature-extraction", modelId, {
-        dtype: "q8",
-        progress_callback: (progress: ProgressInfo) => {
-          if ("progress" in progress && typeof progress.progress === "number") {
-            const file = "file" in progress && typeof progress.file === "string" ? progress.file : "";
-            onStatus({
-              phase: "loading",
-              message: file ? `Loading ${file}` : "Loading model files",
-              progress: Math.min(0.5, Math.max(0.08, progress.progress / 200)),
-            });
-          }
-        },
-      }) as Promise<FeatureExtractor>,
+      loadTransformers().then(({ pipeline }) =>
+        pipeline("feature-extraction", modelId, {
+          dtype: "q8",
+          progress_callback: (progress: ProgressInfo) => {
+            if ("progress" in progress && typeof progress.progress === "number") {
+              const file = "file" in progress && typeof progress.file === "string" ? progress.file : "";
+              onStatus({
+                phase: "loading",
+                message: file ? `Loading ${file}` : "Loading model files",
+                progress: Math.min(0.5, Math.max(0.08, progress.progress / 200)),
+              });
+            }
+          },
+        }) as Promise<FeatureExtractor>,
+      ),
     );
   }
 
@@ -138,9 +160,12 @@ async function getTokenizer(modelId: string, onStatus: (status: PipelineStatus) 
   if (!tokenizerCache.has(modelId)) {
     tokenizerCache.set(
       modelId,
-      AutoTokenizer.from_pretrained(modelId, {
-        progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.26),
-      }),
+      loadTransformers().then(
+        ({ AutoTokenizer }) =>
+          AutoTokenizer.from_pretrained(modelId, {
+            progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.26),
+          }) as Promise<Tokenizer>,
+      ),
     );
   }
 
@@ -151,15 +176,17 @@ async function getCausalLm(modelId: string, onStatus: (status: PipelineStatus) =
   if (!causalLmCache.has(modelId)) {
     causalLmCache.set(
       modelId,
-      Promise.all([
-        AutoTokenizer.from_pretrained(modelId, {
-          progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.28),
-        }),
-        AutoModelForCausalLM.from_pretrained(modelId, {
-          dtype: "q4",
-          progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.52),
-        }),
-      ]).then(([tokenizer, model]) => ({ tokenizer, model })),
+      loadTransformers().then(({ AutoModelForCausalLM, AutoTokenizer }) =>
+        Promise.all([
+          AutoTokenizer.from_pretrained(modelId, {
+            progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.28),
+          }) as Promise<Tokenizer>,
+          AutoModelForCausalLM.from_pretrained(modelId, {
+            dtype: "q4",
+            progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.52),
+          }) as Promise<CausalLmModel>,
+        ]).then(([tokenizer, model]) => ({ tokenizer, model })),
+      ),
     );
   }
 
@@ -319,7 +346,7 @@ async function extractCausalLmVectors(bundle: CausalLmBundle, texts: string[], o
   const layer = outputMode === "final" ? inferLastLayer(outputs) : 4;
   const valueState = outputs[`present.${layer}.value`];
 
-  if (!valueState?.dims || valueState.dims.length !== 4) {
+  if (!isTensorLike(valueState) || valueState.dims.length !== 4) {
     throw new Error(`SmolLM2 did not return value states for layer ${layer}.`);
   }
 
@@ -546,6 +573,16 @@ function inferLastLayer(outputs: Record<string, unknown>) {
   return layers.length ? Math.max(...layers) : 4;
 }
 
+function isTensorLike(value: unknown): value is { data: ArrayLike<number>; dims: number[] } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "data" in value &&
+    "dims" in value &&
+    Array.isArray((value as { dims?: unknown }).dims)
+  );
+}
+
 function classifyFileMime(mimeType: string): "text" | "image" | "unsupported" {
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("text/")) return "text";
@@ -611,3 +648,10 @@ function trimText(value: string, maxLength: number) {
 export function runColor(index: number) {
   return ["#2563eb", "#f59e0b", "#f43f72", "#14b8a6", "#7c3aed"][index % 5];
 }
+
+export const __testing = {
+  chunkTokenIds,
+  displayToken,
+  resolveTokenSamples,
+  validateFiles,
+};

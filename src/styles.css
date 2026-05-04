@@ -849,6 +849,169 @@ button {
   font-weight: 600;
 }
 
+.nearestPanel {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+
+.nearestHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.nearestHeader h3 {
+  margin: 0 0 5px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.nearestHeader span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.neighborhoodToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.neighborhoodToggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--blue);
+}
+
+.nearestLimit {
+  width: 142px;
+}
+
+.nearestLimit button {
+  height: 31px;
+}
+
+.nearestGroups {
+  display: grid;
+  gap: 12px;
+}
+
+.nearestGroups > .muted {
+  margin: 0;
+}
+
+.nearestGroup {
+  display: grid;
+  gap: 7px;
+}
+
+.nearestRunHeader {
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.nearestRunHeader .swatch {
+  margin-top: 0;
+}
+
+.nearestRunHeader strong,
+.nearestRunHeader small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nearestRunHeader strong {
+  display: block;
+  margin: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.nearestRunHeader small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.nearestRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 45px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  padding: 8px 9px;
+  color: inherit;
+  text-align: left;
+}
+
+.nearestRow:hover,
+.nearestRow:focus-visible {
+  border-color: rgba(37, 99, 235, 0.45);
+  background: var(--blue-soft);
+  outline: none;
+}
+
+.nearestRow span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.nearestRow strong,
+.nearestRow small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nearestRow strong {
+  display: block;
+  margin: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.nearestRow small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.nearestRow code {
+  border-radius: 5px;
+  background: #f1f5f9;
+  padding: 4px 6px;
+  color: #0f172a;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .progressTrack {
   position: absolute;
   left: 0;

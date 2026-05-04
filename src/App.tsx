@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { MODEL_PRESETS, SAMPLE_SNIPPETS } from "./data";
 import { ScatterPlot } from "./components/ScatterPlot";
-import { buildEmbeddingInputPlan, createEmbeddingRun, runColor } from "./lib/embeddings";
 import type {
   EmbeddingInputPlan,
   EmbeddingPoint,
@@ -29,7 +28,15 @@ import type {
 
 const initialRuns: RunRecord[] = [];
 
-function App() {
+type EmbeddingServices = Pick<typeof import("./lib/embeddings"), "buildEmbeddingInputPlan" | "createEmbeddingRun" | "runColor">;
+
+declare global {
+  interface Window {
+    __EMBEDDINGVIZ_TEST__?: Partial<EmbeddingServices>;
+  }
+}
+
+function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServices> } = {}) {
   const [modelId, setModelId] = useState(MODEL_PRESETS[0].id);
   const [outputMode, setOutputMode] = useState<OutputMode>("final");
   const [inputType, setInputType] = useState<InputType>("text");
@@ -45,6 +52,8 @@ function App() {
   });
   const [runs, setRuns] = useState<RunRecord[]>(initialRuns);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
+  const [neighborLimit, setNeighborLimit] = useState(5);
+  const [showNeighborhood, setShowNeighborhood] = useState(false);
   const [query, setQuery] = useState("");
   const [is3d, setIs3d] = useState(false);
   const [status, setStatus] = useState<PipelineStatus>({
@@ -59,63 +68,69 @@ function App() {
     () => runs.flatMap((run) => run.points).find((point) => point.id === selectedPointId) ?? runs[0]?.points[0] ?? null,
     [runs, selectedPointId],
   );
+  const selectedRun = useMemo(
+    () => (selectedPoint ? runs.find((run) => run.points.some((point) => point.id === selectedPoint.id)) ?? null : null),
+    [runs, selectedPoint],
+  );
+  const nearestByRun = useMemo(
+    () => (selectedPoint ? nearestNeighborsByRun(selectedPoint, runs, neighborLimit) : []),
+    [neighborLimit, runs, selectedPoint],
+  );
+  const neighborhoodPointIds = useMemo(() => {
+    if (!showNeighborhood || !selectedPoint) return null;
+    return new Set([selectedPoint.id, ...nearestByRun.flatMap((group) => group.neighbors.map((neighbor) => neighbor.point.id))]);
+  }, [nearestByRun, selectedPoint, showNeighborhood]);
   const totalVisible = runs.filter((run) => run.visible).reduce((sum, run) => sum + run.count, 0);
   const effectiveInputType = activeOutputMode === "tokens" ? "tokens" : inputType;
   const isWorking = status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting";
   const isPlanning = inputPlanStatus.phase === "loading";
-  const plannedPointCount = effectiveInputType === "tokens" ? null : inputPlan?.samples.length ?? 0;
-  const canRun = !isWorking && (effectiveInputType === "tokens" || (!isPlanning && plannedPointCount !== null && plannedPointCount >= 2));
+  const candidateInputCount =
+    effectiveInputType === "tokens" ? 2 : effectiveInputType === "files" ? files.length : snippets.filter((snippet) => snippet.text.trim()).length;
+  const canRun = !isWorking && !isPlanning && candidateInputCount >= 2;
 
   useEffect(() => {
-    let cancelled = false;
-
+    setInputPlan(null);
     if (effectiveInputType === "tokens") {
-      setInputPlan(null);
-      setInputPlanStatus({ phase: "ready", message: "Token table uses vocabulary entries", progress: 1 });
+      setInputPlanStatus({ phase: "idle", message: "Token table loads vocabulary on Run", progress: 0 });
       return;
     }
 
-    setInputPlan(null);
-    setInputPlanStatus({ phase: "loading", message: "Counting tokens", progress: 0.02 });
-
-    buildEmbeddingInputPlan({
-      model,
-      inputType: effectiveInputType,
-      snippets,
-      files,
-      onStatus: (nextStatus) => {
-        if (!cancelled) setInputPlanStatus(nextStatus);
-      },
-    })
-      .then((plan) => {
-        if (cancelled) return;
-        setInputPlan(plan);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setInputPlanStatus({
-          phase: "error",
-          message: error instanceof Error ? error.message : "Unable to count tokens",
-          progress: 0,
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    setInputPlanStatus({ phase: "idle", message: "Token plan will be prepared on Run", progress: 0 });
   }, [effectiveInputType, files, model, snippets]);
 
   async function handleRun() {
     try {
-      setStatus({ phase: "loading", message: "Preparing model", progress: 0.02 });
-      const result = await createEmbeddingRun({
+      setStatus({ phase: "loading", message: "Loading projection pipeline", progress: 0.02 });
+      const embeddingModule = await import("./lib/embeddings");
+      const services: EmbeddingServices = {
+        buildEmbeddingInputPlan: embeddingModule.buildEmbeddingInputPlan,
+        createEmbeddingRun: embeddingModule.createEmbeddingRun,
+        runColor: embeddingModule.runColor,
+        ...devMockEmbeddingServices(),
+        ...(typeof window === "undefined" ? {} : window.__EMBEDDINGVIZ_TEST__),
+        ...embeddingServices,
+      };
+      const preparedInputPlan =
+        effectiveInputType === "tokens"
+          ? null
+          : await services.buildEmbeddingInputPlan({
+              model,
+              inputType: effectiveInputType,
+              snippets,
+              files,
+              onStatus: setInputPlanStatus,
+            });
+
+      setInputPlan(preparedInputPlan);
+      setStatus({ phase: "loading", message: "Preparing model", progress: 0.04 });
+      const result = await services.createEmbeddingRun({
         model,
         outputMode: activeOutputMode,
         inputType: effectiveInputType,
         reduction,
         snippets,
         files,
-        inputPlan,
+        inputPlan: preparedInputPlan,
         onStatus: setStatus,
       });
 
@@ -126,7 +141,7 @@ function App() {
         model: model.label,
         output: outputLabel(activeOutputMode, model.task),
         reduction,
-        color: runColor(runIndex),
+        color: services.runColor(runIndex),
         count: result.points.length,
         current: true,
         visible: true,
@@ -136,11 +151,13 @@ function App() {
       setRuns((current) => [run, ...current.map((item) => ({ ...item, current: false }))].slice(0, 4));
       setSelectedPointId(result.points[0]?.id ?? null);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Embedding run failed";
       setStatus({
         phase: "error",
-        message: error instanceof Error ? error.message : "Embedding run failed",
+        message,
         progress: 0,
       });
+      setInputPlanStatus((current) => (current.phase === "loading" ? { phase: "error", message, progress: 0 } : current));
     }
   }
 
@@ -245,7 +262,7 @@ function App() {
           <div className="topbarStatusSegment">{runs[0]?.reduction ?? reduction} projected</div>
         </div>
 
-        <button className="runButton" type="button" onClick={handleRun} disabled={!canRun}>
+        <button className="runButton" type="button" onClick={handleRun} disabled={!canRun} data-testid="run-projection">
           {isWorking ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
           Run
         </button>
@@ -332,7 +349,12 @@ function App() {
                   </div>
                   {snippets.map((snippet) => (
                     <div className="snippetItem" key={snippet.id}>
-                      <input value={snippet.text} onChange={(event) => updateSnippet(snippet.id, event.target.value)} aria-label="Snippet text" />
+                      <input
+                        value={snippet.text}
+                        onChange={(event) => updateSnippet(snippet.id, event.target.value)}
+                        aria-label="Snippet text"
+                        data-testid="snippet-input"
+                      />
                       <button type="button" title="Remove snippet" onClick={() => removeSnippet(snippet.id)}>
                         <X size={15} />
                       </button>
@@ -372,6 +394,7 @@ function App() {
                   type="button"
                   onClick={() => setReduction(method)}
                   title={`Project with ${method}`}
+                  data-testid={`reduction-${method}`}
                 >
                   {method}
                 </button>
@@ -386,6 +409,7 @@ function App() {
           query={query}
           is3d={is3d}
           primaryReduction={runs[0]?.reduction ?? reduction}
+          neighborhoodPointIds={neighborhoodPointIds}
           onQueryChange={setQuery}
           onPointSelect={(point: EmbeddingPoint) => setSelectedPointId(point.id)}
           onToggle3d={setIs3d}
@@ -426,7 +450,7 @@ function App() {
             {selectedPoint ? (
               <>
                 <span className="metaLabel">{selectedPoint.kind === "token" ? "Subword token" : "Label"}</span>
-                <strong>{selectedPoint.label}</strong>
+                <strong data-testid="selected-point-label">{selectedPoint.label}</strong>
                 <p>
                   {selectedPoint.kind === "token"
                     ? `Raw token ${selectedPoint.rawToken ?? selectedPoint.snippet}${selectedPoint.tokenId === undefined ? "" : ` · id ${selectedPoint.tokenId}`}`
@@ -448,6 +472,58 @@ function App() {
                 <p>{selectedPoint.source} · {selectedPoint.output}</p>
                 <span className="metaLabel">Dimensions</span>
                 <p>{selectedPoint.vector.length}</p>
+                <div className="nearestPanel">
+                  <div className="nearestHeader">
+                    <div>
+                      <h3>Nearest points</h3>
+                      <span>{selectedRun ? `Cosine distance from ${selectedRun.name}` : "Cosine distance"}</span>
+                    </div>
+                    <label className="neighborhoodToggle">
+                      <input type="checkbox" checked={showNeighborhood} onChange={(event) => setShowNeighborhood(event.target.checked)} />
+                      <span>Show neighborhood</span>
+                    </label>
+                  </div>
+                  <div className="segmented small nearestLimit" aria-label="Nearest neighbor count">
+                    {[3, 5, 10].map((limit) => (
+                      <button
+                        key={limit}
+                        className={neighborLimit === limit ? "active" : ""}
+                        type="button"
+                        onClick={() => setNeighborLimit(limit)}
+                      >
+                        {limit}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="nearestGroups">
+                    {nearestByRun.length === 0 ? <p className="muted">No comparable points in visible runs.</p> : null}
+                    {nearestByRun.map((group) => (
+                      <div className="nearestGroup" key={group.run.id}>
+                        <div className="nearestRunHeader">
+                          <span className="swatch" style={{ backgroundColor: group.run.color }} />
+                          <strong>{group.run.name}</strong>
+                          <small>
+                            {group.run.current ? "Current" : "Previous"} · {group.neighbors.length} nearest
+                          </small>
+                        </div>
+                        {group.neighbors.map((neighbor) => (
+                          <button
+                            className="nearestRow"
+                            type="button"
+                            key={neighbor.point.id}
+                            onClick={() => setSelectedPointId(neighbor.point.id)}
+                          >
+                            <span>
+                              <strong>{neighbor.point.label}</strong>
+                              <small>{neighbor.point.source}</small>
+                            </span>
+                            <code>{neighbor.distance.toFixed(4)}</code>
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </>
             ) : (
               <p className="muted">No point selected.</p>
@@ -531,6 +607,129 @@ function InputPlanRow({ item }: { item: InputPlanItem }) {
       </div>
     </div>
   );
+}
+
+function devMockEmbeddingServices(): Partial<EmbeddingServices> {
+  if (
+    !import.meta.env.DEV ||
+    typeof window === "undefined" ||
+    !new URLSearchParams(window.location.search).has("mockEmbeddings")
+  ) {
+    return {};
+  }
+
+  return {
+    buildEmbeddingInputPlan: async ({ model, inputType, snippets, onStatus }) => {
+      const samples = snippets
+        .filter((snippet) => snippet.text.trim())
+        .map((snippet, index) => {
+          const label = snippet.text.trim();
+          return {
+            id: `mock-snippet-${index}`,
+            text: label,
+            label,
+            parentLabel: label,
+            source: "Text snippets",
+            kind: "input" as const,
+            tokenCount: 3,
+            chunkIndex: 1,
+            chunkCount: 1,
+            tokenStart: 1,
+            tokenEnd: 3,
+          };
+        });
+
+      onStatus({ phase: "ready", message: `${samples.length} chunks`, progress: 1 });
+      return {
+        inputType,
+        modelId: model.id,
+        chunkSize: model.maxInputTokens,
+        overlapTokens: 24,
+        items: [],
+        samples,
+        totalTokens: samples.length * 3,
+        totalChunks: samples.length,
+        skippedCount: 0,
+      };
+    },
+    createEmbeddingRun: async ({ snippets, reduction, onStatus }) => {
+      const labels = snippets.filter((snippet) => snippet.text.trim()).map((snippet) => snippet.text.trim());
+      onStatus({ phase: "embedding", message: "Mock embeddings", progress: 0.6 });
+      onStatus({ phase: "projecting", message: `Running ${reduction}`, progress: 0.85 });
+      onStatus({ phase: "ready", message: `Mock ${reduction} complete`, progress: 1 });
+
+      return {
+        explained: [0.8, 0.15, 0.05],
+        points: labels.map((label, index) => ({
+          id: `mock-point-${index}`,
+          label,
+          parentLabel: label,
+          snippet: label,
+          source: "Text snippets",
+          output: "Final embedding",
+          vector: [index + 1, index === 1 ? 1 : 0, index === 2 ? 1 : 0],
+          x: [-5, 0, 5][index] ?? 0,
+          y: [0, 5, -5][index] ?? 0,
+          z: 0,
+          kind: "input" as const,
+          tokenCount: 3,
+          chunkIndex: 1,
+          chunkCount: 1,
+          tokenStart: 1,
+          tokenEnd: 3,
+        })),
+      };
+    },
+    runColor: () => "#2563eb",
+  };
+}
+
+interface NearestNeighbor {
+  point: EmbeddingPoint;
+  distance: number;
+}
+
+interface NearestNeighborGroup {
+  run: RunRecord;
+  neighbors: NearestNeighbor[];
+}
+
+function nearestNeighborsByRun(selectedPoint: EmbeddingPoint, runs: RunRecord[], limit: number): NearestNeighborGroup[] {
+  return runs
+    .filter((run) => run.visible)
+    .map((run) => ({
+      run,
+      neighbors: run.points
+        .filter((point) => point.id !== selectedPoint.id)
+        .map((point) => ({
+          point,
+          distance: cosineDistance(selectedPoint.vector, point.vector),
+        }))
+        .filter((neighbor) => Number.isFinite(neighbor.distance))
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, limit),
+    }))
+    .filter((group) => group.neighbors.length > 0);
+}
+
+function cosineDistance(a: ArrayLike<number>, b: ArrayLike<number>) {
+  const length = Math.min(a.length, b.length);
+  if (length === 0) return Number.POSITIVE_INFINITY;
+
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let index = 0; index < length; index += 1) {
+    const valueA = a[index];
+    const valueB = b[index];
+    dot += valueA * valueB;
+    normA += valueA * valueA;
+    normB += valueB * valueB;
+  }
+
+  if (normA === 0 || normB === 0) return Number.POSITIVE_INFINITY;
+  const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  return 1 - Math.min(Math.max(similarity, -1), 1);
 }
 
 function runName(inputType: InputType) {

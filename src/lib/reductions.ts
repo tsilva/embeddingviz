@@ -1,7 +1,6 @@
 import type { PipelineStatus, ReductionMethod } from "../types";
 import { projectReductionCore } from "./reductionCore";
 import type { ProjectionResult, VectorRow } from "./pca";
-import ReductionWorker from "./reductions.worker?worker";
 
 type StatusReporter = (status: PipelineStatus) => void;
 
@@ -39,10 +38,10 @@ export async function projectReduction(vectors: VectorRow[], method: ReductionMe
   }
 }
 
-function projectReductionInWorker(vectors: VectorRow[], method: ReductionMethod, onStatus: StatusReporter) {
+async function projectReductionInWorker(vectors: VectorRow[], method: ReductionMethod, onStatus: StatusReporter) {
   const { data, rows, dimensions } = packVectors(vectors);
   const id = crypto.randomUUID();
-  const worker = new ReductionWorker();
+  const worker = await createReductionWorker();
 
   return new Promise<ProjectionResult>((resolve, reject) => {
     worker.onmessage = (event: MessageEvent<ReductionWorkerMessage>) => {
@@ -73,6 +72,11 @@ function projectReductionInWorker(vectors: VectorRow[], method: ReductionMethod,
 
     worker.postMessage({ id, method, rows, dimensions, buffer: data.buffer }, [data.buffer]);
   });
+}
+
+async function createReductionWorker() {
+  const { default: ReductionWorker } = await import("./reductions.worker?worker");
+  return new ReductionWorker();
 }
 
 function packVectors(vectors: VectorRow[]) {
