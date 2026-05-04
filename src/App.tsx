@@ -122,6 +122,13 @@ function App() {
     }
   }
 
+  function chooseOutputMode(nextOutputMode: OutputMode) {
+    setOutputMode(nextOutputMode);
+    if (nextOutputMode === "tokens") {
+      setInputType("tokens");
+    }
+  }
+
   return (
     <div className="appShell">
       <header className="topbar">
@@ -151,6 +158,9 @@ function App() {
           {status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting" ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
           Run
         </button>
+        <div className="progressTrack" aria-hidden="true">
+          <span style={{ width: `${Math.round(status.progress * 100)}%` }} />
+        </div>
       </header>
 
       <div className="workspace">
@@ -180,7 +190,7 @@ function App() {
               Output
             </label>
             <div className="selectShell">
-              <select id="output" value={outputMode} onChange={(event) => setOutputMode(event.target.value as OutputMode)}>
+              <select id="output" value={outputMode} onChange={(event) => chooseOutputMode(event.target.value as OutputMode)}>
                 <option value="final">Final embedding</option>
                 <option value="hidden-4">Layer 4 · hidden state</option>
                 <option value="tokens">Token table · embeddings</option>
@@ -250,7 +260,7 @@ function App() {
             ) : null}
 
             {inputType === "images" ? <p className="notice">Image inputs require an image-feature-extraction model.</p> : null}
-            {inputType === "tokens" ? <p className="notice">Uses a compact token sample for MVP token-space visualization.</p> : null}
+            {inputType === "tokens" ? <p className="notice">Plots the tokenizer vocabulary with a WebGL point layer.</p> : null}
           </section>
 
           <section className="controlSection">
@@ -315,9 +325,13 @@ function App() {
             <h2>Selected point</h2>
             {selectedPoint ? (
               <>
-                <span className="metaLabel">Label / Snippet</span>
+                <span className="metaLabel">{selectedPoint.kind === "token" ? "Subword token" : "Label / Snippet"}</span>
                 <strong>{selectedPoint.label}</strong>
-                <p>{selectedPoint.snippet}</p>
+                <p>
+                  {selectedPoint.kind === "token"
+                    ? `Raw token ${selectedPoint.rawToken ?? selectedPoint.snippet}${selectedPoint.tokenId === undefined ? "" : ` · id ${selectedPoint.tokenId}`}`
+                    : selectedPoint.snippet}
+                </p>
                 <span className="metaLabel">Source</span>
                 <p>{selectedPoint.source} · {selectedPoint.output}</p>
                 <span className="metaLabel">Dimensions</span>
@@ -337,9 +351,6 @@ function App() {
         </div>
         <div className="statusSegment">{totalVisible} visible points</div>
         <div className="statusSegment">{reduction === "PCA" ? "PCA projected" : `${reduction} selected · PCA fallback`}</div>
-        <div className="progressTrack" aria-hidden="true">
-          <span style={{ width: `${Math.round(status.progress * 100)}%` }} />
-        </div>
       </footer>
     </div>
   );
@@ -355,7 +366,7 @@ function runName(inputType: InputType) {
 function outputLabel(outputMode: OutputMode, task?: typeof MODEL_PRESETS[number]["task"]) {
   if (task === "text-generation") {
     if (outputMode === "final") return "Final LM value state";
-    if (outputMode === "tokens") return "Token sample · LM layer 4";
+    if (outputMode === "tokens") return "Tokenizer subword features";
     return "Layer 4 · LM value state";
   }
   if (outputMode === "hidden-4") return "Layer 4 · hidden state";

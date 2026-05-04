@@ -4,8 +4,9 @@ export interface ProjectionResult {
 }
 
 const EPSILON = 1e-9;
+type VectorRow = ArrayLike<number>;
 
-export function projectPca(vectors: number[][], dimensions = 3): ProjectionResult {
+export function projectPca(vectors: VectorRow[], dimensions = 3): ProjectionResult {
   if (vectors.length === 0) {
     return { coordinates: [], explained: [0, 0, 0] };
   }
@@ -15,10 +16,9 @@ export function projectPca(vectors: number[][], dimensions = 3): ProjectionResul
   }
 
   const dim = vectors[0].length;
-  const means = Array.from({ length: dim }, (_, col) => average(vectors.map((row) => row[col] ?? 0)));
-  const centered = vectors.map((row) => row.map((value, col) => (value ?? 0) - means[col]));
-  const covarianceRows = sampleRows(centered, 1600);
-  const covariance = buildCovariance(covarianceRows, dim);
+  const means = averageColumns(vectors, dim);
+  const covarianceRows = sampleRows(vectors, 1600);
+  const covariance = buildCovariance(covarianceRows, means, dim);
   const components: number[][] = [];
   const eigenvalues: number[] = [];
   let working = covariance.map((row) => [...row]);
@@ -31,8 +31,8 @@ export function projectPca(vectors: number[][], dimensions = 3): ProjectionResul
     working = deflate(working, component, eigenvalue);
   }
 
-  const coordinates = centered.map((row) => {
-    const projected = components.map((component) => dot(row, component));
+  const coordinates = vectors.map((row) => {
+    const projected = components.map((component) => dotCentered(row, component, means));
     return [projected[0] ?? 0, projected[1] ?? 0, projected[2] ?? 0] as [number, number, number];
   });
 
@@ -44,7 +44,7 @@ export function projectPca(vectors: number[][], dimensions = 3): ProjectionResul
   };
 }
 
-function sampleRows(rows: number[][], maxRows: number) {
+function sampleRows(rows: VectorRow[], maxRows: number) {
   if (rows.length <= maxRows) {
     return rows;
   }
@@ -53,15 +53,15 @@ function sampleRows(rows: number[][], maxRows: number) {
   return Array.from({ length: maxRows }, (_, index) => rows[Math.floor(index * step)]);
 }
 
-function buildCovariance(centered: number[][], dim: number) {
+function buildCovariance(rows: VectorRow[], means: number[], dim: number) {
   const matrix = Array.from({ length: dim }, () => Array.from({ length: dim }, () => 0));
-  const scale = 1 / Math.max(centered.length - 1, 1);
+  const scale = 1 / Math.max(rows.length - 1, 1);
 
-  for (const row of centered) {
+  for (const row of rows) {
     for (let i = 0; i < dim; i += 1) {
-      const left = row[i] ?? 0;
+      const left = (row[i] ?? 0) - means[i];
       for (let j = i; j < dim; j += 1) {
-        matrix[i][j] += left * (row[j] ?? 0) * scale;
+        matrix[i][j] += left * ((row[j] ?? 0) - means[j]) * scale;
       }
     }
   }
@@ -103,18 +103,32 @@ function normalize(vector: number[]) {
 }
 
 function normalizeCoordinates(coordinates: Array<[number, number, number]>) {
-  const maxAbs = Math.max(
-    ...coordinates.flatMap(([x, y, z]) => [Math.abs(x), Math.abs(y), Math.abs(z)]),
-    EPSILON,
-  );
+  let maxAbs = EPSILON;
+  for (const [x, y, z] of coordinates) {
+    maxAbs = Math.max(maxAbs, Math.abs(x), Math.abs(y), Math.abs(z));
+  }
   const scale = 5 / maxAbs;
   return coordinates.map(([x, y, z]) => [x * scale, y * scale, z * scale] as [number, number, number]);
 }
 
-function average(values: number[]) {
-  return values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1);
+function averageColumns(rows: VectorRow[], dim: number) {
+  const means = Array.from({ length: dim }, () => 0);
+  for (const row of rows) {
+    for (let col = 0; col < dim; col += 1) {
+      means[col] += row[col] ?? 0;
+    }
+  }
+  return means.map((sum) => sum / Math.max(rows.length, 1));
 }
 
 function dot(a: number[], b: number[]) {
   return a.reduce((sum, value, index) => sum + value * (b[index] ?? 0), 0);
+}
+
+function dotCentered(row: VectorRow, component: number[], means: number[]) {
+  let sum = 0;
+  for (let index = 0; index < component.length; index += 1) {
+    sum += ((row[index] ?? 0) - means[index]) * component[index];
+  }
+  return sum;
 }

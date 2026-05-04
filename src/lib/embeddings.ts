@@ -1,4 +1,4 @@
-import { AutoModel, AutoModelForCausalLM, AutoTokenizer, Tensor, env, pipeline, type ProgressInfo } from "@huggingface/transformers";
+import { AutoModelForCausalLM, AutoTokenizer, env, pipeline, type ProgressInfo } from "@huggingface/transformers";
 import type { EmbeddingPoint, InputType, ModelPreset, OutputMode, PipelineStatus, TextSnippet } from "../types";
 import { GROUP_COLORS } from "../data";
 import { projectPca } from "./pca";
@@ -13,20 +13,21 @@ type CausalLmBundle = {
   model: Awaited<ReturnType<typeof AutoModelForCausalLM.from_pretrained>>;
 };
 type Tokenizer = Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>;
-type EncoderModel = Awaited<ReturnType<typeof AutoModel.from_pretrained>>;
+const MAX_TOKEN_POINTS = 50000;
 
 interface ResolvedSample {
   text: string;
   label: string;
   group: string;
   source: string;
+  kind?: "input" | "token";
   tokenId?: number;
+  rawToken?: string;
 }
 
 const extractorCache = new Map<string, Promise<FeatureExtractor>>();
 const causalLmCache = new Map<string, Promise<CausalLmBundle>>();
 const tokenizerCache = new Map<string, Promise<Tokenizer>>();
-const encoderCache = new Map<string, Promise<EncoderModel>>();
 
 export async function createEmbeddingRun({
   model,
@@ -67,6 +68,9 @@ export async function createEmbeddingRun({
     x: projection.coordinates[index][0],
     y: projection.coordinates[index][1],
     z: projection.coordinates[index][2],
+    kind: sample.kind,
+    tokenId: sample.tokenId,
+    rawToken: sample.rawToken,
   }));
 
   onStatus({
@@ -117,20 +121,6 @@ async function getTokenizer(modelId: string, onStatus: (status: PipelineStatus) 
   return tokenizerCache.get(modelId)!;
 }
 
-async function getEncoder(modelId: string, onStatus: (status: PipelineStatus) => void) {
-  if (!encoderCache.has(modelId)) {
-    encoderCache.set(
-      modelId,
-      AutoModel.from_pretrained(modelId, {
-        dtype: "q8",
-        progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.5),
-      }),
-    );
-  }
-
-  return encoderCache.get(modelId)!;
-}
-
 async function getCausalLm(modelId: string, onStatus: (status: PipelineStatus) => void) {
   if (!causalLmCache.has(modelId)) {
     causalLmCache.set(
@@ -159,12 +149,7 @@ async function extractVectors(
 ) {
   onStatus({ phase: "loading", message: "Loading ONNX model", progress: 0.05 });
 
-  if (inputType === "tokens" && model.task === "feature-extraction") {
-    onStatus({ phase: "embedding", message: `Extracting ${samples.length.toLocaleString()} token vectors`, progress: 0.52 });
-    return extractEncoderTokenVectors(model.id, samples, onStatus);
-  }
-
-  if (inputType === "tokens" && model.task === "text-generation") {
+  if (inputType === "tokens") {
     onStatus({ phase: "embedding", message: `Projecting ${samples.length.toLocaleString()} tokenizer tokens`, progress: 0.64 });
     return tokenizerFeatureVectors(samples);
   }
@@ -185,60 +170,6 @@ async function extractVectors(
   const pooling = outputMode === "hidden-4" ? "cls" : "mean";
   const output = await extractor(samples.map((sample) => sample.text), { pooling, normalize: true });
   return tensorRows(output.tolist());
-}
-
-async function extractEncoderTokenVectors(modelId: string, samples: ResolvedSample[], onStatus: (status: PipelineStatus) => void) {
-  const tokenizer = await getTokenizer(modelId, onStatus);
-  const model = await getEncoder(modelId, onStatus);
-  const specialIds = tokenizer as Tokenizer & {
-    cls_token_id?: number | bigint;
-    bos_token_id?: number | bigint;
-    sep_token_id?: number | bigint;
-    eos_token_id?: number | bigint;
-  };
-  const clsId = Number(specialIds.cls_token_id ?? specialIds.bos_token_id ?? 0);
-  const sepId = Number(specialIds.sep_token_id ?? specialIds.eos_token_id ?? clsId);
-  const batchSize = 2048;
-  const vectors: number[][] = [];
-
-  for (let start = 0; start < samples.length; start += batchSize) {
-    const chunk = samples.slice(start, start + batchSize);
-    const actualBatch = chunk.length;
-    const inputIds = new BigInt64Array(actualBatch * 3);
-    const attentionMask = new BigInt64Array(actualBatch * 3);
-    const tokenTypeIds = new BigInt64Array(actualBatch * 3);
-
-    chunk.forEach((sample, index) => {
-      const offset = index * 3;
-      inputIds[offset] = BigInt(clsId);
-      inputIds[offset + 1] = BigInt(sample.tokenId ?? 0);
-      inputIds[offset + 2] = BigInt(sepId);
-      attentionMask[offset] = 1n;
-      attentionMask[offset + 1] = 1n;
-      attentionMask[offset + 2] = 1n;
-    });
-
-    const output = await model({
-      input_ids: new Tensor("int64", inputIds, [actualBatch, 3]),
-      attention_mask: new Tensor("int64", attentionMask, [actualBatch, 3]),
-      token_type_ids: new Tensor("int64", tokenTypeIds, [actualBatch, 3]),
-    });
-
-    const hidden = output.last_hidden_state;
-    const hiddenDim = hidden.dims[2];
-    for (let row = 0; row < actualBatch; row += 1) {
-      const offset = (row * 3 + 1) * hiddenDim;
-      vectors.push(Array.from(hidden.data.slice(offset, offset + hiddenDim), Number));
-    }
-
-    onStatus({
-      phase: "embedding",
-      message: `Extracted ${Math.min(start + actualBatch, samples.length).toLocaleString()} / ${samples.length.toLocaleString()} token vectors`,
-      progress: 0.52 + Math.min((start + actualBatch) / samples.length, 1) * 0.24,
-    });
-  }
-
-  return normalizeRows(vectors);
 }
 
 async function extractCausalLmVectors(bundle: CausalLmBundle, texts: string[], outputMode: OutputMode) {
@@ -268,15 +199,15 @@ async function resolveSamples(
   if (inputType === "tokens") {
     onStatus({ phase: "loading", message: "Loading tokenizer vocabulary", progress: 0.04 });
     const tokenizer = await getTokenizer(model.id, onStatus);
-    return [...tokenizer.get_vocab().entries()]
-      .sort((left, right) => left[1] - right[1])
-      .map(([token, tokenId]) => ({
-        text: token,
-        label: displayToken(token),
-        group: "Tokens",
-        source: `Token id ${tokenId}`,
-        tokenId,
-      }));
+    return resolveTokenSamples(tokenizer.get_vocab()).map(([token, tokenId]) => ({
+      text: token,
+      label: displayToken(token),
+      group: "Tokens",
+      source: `Token id ${tokenId}`,
+      kind: "token",
+      tokenId,
+      rawToken: token,
+    }));
   }
 
   if (inputType === "files") {
@@ -286,6 +217,7 @@ async function resolveSamples(
         label: file.name,
         group: "Files",
         source: file.name,
+        kind: "input" as const,
       })),
     );
     return loaded.filter((file) => file.text.length > 0);
@@ -298,6 +230,7 @@ async function resolveSamples(
       label: snippet.label.trim() || trimText(snippet.text, 42),
       group: snippet.group,
       source: "Text snippets",
+      kind: "input",
     }));
 }
 
@@ -305,6 +238,20 @@ function displayToken(token: string) {
   if (token === " ") return "space";
   if (token === "\n") return "newline";
   return token.replaceAll("Ġ", " ").replaceAll("▁", " ").replaceAll("</w>", "");
+}
+
+function resolveTokenSamples(vocabulary: Map<string, number>) {
+  const entries = Array.from(vocabulary.entries()).sort((left, right) => left[1] - right[1]);
+  const visibleTokens = entries.filter(([token]) => !isSpecialToken(token) && displayToken(token).trim().length > 0);
+  if (visibleTokens.length >= 2) {
+    return visibleTokens.slice(0, MAX_TOKEN_POINTS);
+  }
+
+  return entries.slice(0, 2);
+}
+
+function isSpecialToken(token: string) {
+  return /^<.*>$/.test(token) || /^\[.*\]$/.test(token);
 }
 
 function tensorRows(value: unknown): number[][] {
@@ -348,7 +295,7 @@ function validateCompatibility(model: ModelPreset, inputType: InputType) {
 function outputLabel(outputMode: OutputMode, task?: ModelPreset["task"]) {
   if (task === "text-generation") {
     if (outputMode === "final") return "Final LM value state";
-    if (outputMode === "tokens") return "Tokenizer vocabulary";
+    if (outputMode === "tokens") return "Tokenizer subword features";
     return "Layer 4 · LM value state";
   }
   if (outputMode === "hidden-4") return "Layer 4 · hidden state";

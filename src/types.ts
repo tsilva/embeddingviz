@@ -16,10 +16,13 @@ export interface EmbeddingPoint {
   group: string;
   source: string;
   output: string;
-  vector: number[];
+  vector: ArrayLike<number>;
   x: number;
   y: number;
   z: number;
+  kind?: "input" | "token";
+  tokenId?: number;
+  rawToken?: string;
 }
 
 export interface RunRecord {
