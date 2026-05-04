@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import {
   BrainCircuit,
   Check,
@@ -14,8 +14,18 @@ import {
 } from "lucide-react";
 import { MODEL_PRESETS, SAMPLE_SNIPPETS } from "./data";
 import { ScatterPlot } from "./components/ScatterPlot";
-import { createEmbeddingRun, runColor } from "./lib/embeddings";
-import type { EmbeddingPoint, InputType, OutputMode, PipelineStatus, ReductionMethod, RunRecord, TextSnippet } from "./types";
+import { buildEmbeddingInputPlan, createEmbeddingRun, runColor } from "./lib/embeddings";
+import type {
+  EmbeddingInputPlan,
+  EmbeddingPoint,
+  InputPlanItem,
+  InputType,
+  OutputMode,
+  PipelineStatus,
+  ReductionMethod,
+  RunRecord,
+  TextSnippet,
+} from "./types";
 
 const initialRuns: RunRecord[] = [];
 
@@ -27,6 +37,12 @@ function App() {
   const [snippets, setSnippets] = useState<TextSnippet[]>(SAMPLE_SNIPPETS.slice(0, 3));
   const [files, setFiles] = useState<File[]>([]);
   const [fileMessage, setFileMessage] = useState("");
+  const [inputPlan, setInputPlan] = useState<EmbeddingInputPlan | null>(null);
+  const [inputPlanStatus, setInputPlanStatus] = useState<PipelineStatus>({
+    phase: "idle",
+    message: "Counting tokens",
+    progress: 0,
+  });
   const [runs, setRuns] = useState<RunRecord[]>(initialRuns);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -46,6 +62,48 @@ function App() {
   const totalVisible = runs.filter((run) => run.visible).reduce((sum, run) => sum + run.count, 0);
   const effectiveInputType = activeOutputMode === "tokens" ? "tokens" : inputType;
   const isWorking = status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting";
+  const isPlanning = inputPlanStatus.phase === "loading";
+  const plannedPointCount = effectiveInputType === "tokens" ? null : inputPlan?.samples.length ?? 0;
+  const canRun = !isWorking && (effectiveInputType === "tokens" || (!isPlanning && plannedPointCount !== null && plannedPointCount >= 2));
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (effectiveInputType === "tokens") {
+      setInputPlan(null);
+      setInputPlanStatus({ phase: "ready", message: "Token table uses vocabulary entries", progress: 1 });
+      return;
+    }
+
+    setInputPlan(null);
+    setInputPlanStatus({ phase: "loading", message: "Counting tokens", progress: 0.02 });
+
+    buildEmbeddingInputPlan({
+      model,
+      inputType: effectiveInputType,
+      snippets,
+      files,
+      onStatus: (nextStatus) => {
+        if (!cancelled) setInputPlanStatus(nextStatus);
+      },
+    })
+      .then((plan) => {
+        if (cancelled) return;
+        setInputPlan(plan);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setInputPlanStatus({
+          phase: "error",
+          message: error instanceof Error ? error.message : "Unable to count tokens",
+          progress: 0,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveInputType, files, model, snippets]);
 
   async function handleRun() {
     try {
@@ -57,6 +115,7 @@ function App() {
         reduction,
         snippets,
         files,
+        inputPlan,
         onStatus: setStatus,
       });
 
@@ -186,7 +245,7 @@ function App() {
           <div className="topbarStatusSegment">{runs[0]?.reduction ?? reduction} projected</div>
         </div>
 
-        <button className="runButton" type="button" onClick={handleRun} disabled={isWorking}>
+        <button className="runButton" type="button" onClick={handleRun} disabled={!canRun}>
           {isWorking ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
           Run
         </button>
@@ -298,6 +357,8 @@ function App() {
                   <small>{fileMessage || `Accepts ${acceptedFileLabel(model)} for ${model.label}.`}</small>
                 </div>
               ) : null}
+
+              <InputPlanSummary inputPlan={inputPlan} status={inputPlanStatus} maxInputTokens={model.maxInputTokens} />
             </section>
           )}
 
@@ -333,7 +394,7 @@ function App() {
         <aside className="rightPanel">
           <div className="panelHeader">
             <h2>Runs</h2>
-            <button type="button" onClick={handleRun}>
+            <button type="button" onClick={handleRun} disabled={!canRun}>
               <Plus size={16} />
               New run
             </button>
@@ -371,6 +432,18 @@ function App() {
                     ? `Raw token ${selectedPoint.rawToken ?? selectedPoint.snippet}${selectedPoint.tokenId === undefined ? "" : ` · id ${selectedPoint.tokenId}`}`
                     : selectedPoint.snippet}
                 </p>
+                {selectedPoint.kind !== "token" && selectedPoint.chunkIndex ? (
+                  <>
+                    <span className="metaLabel">Chunk</span>
+                    <p>
+                      {selectedPoint.chunkIndex} of {selectedPoint.chunkCount ?? 1}
+                      {selectedPoint.tokenStart && selectedPoint.tokenEnd
+                        ? ` · tokens ${selectedPoint.tokenStart.toLocaleString()}-${selectedPoint.tokenEnd.toLocaleString()}`
+                        : ""}
+                      {selectedPoint.tokenCount ? ` · ${selectedPoint.tokenCount.toLocaleString()} tokens` : ""}
+                    </p>
+                  </>
+                ) : null}
                 <span className="metaLabel">Source</span>
                 <p>{selectedPoint.source} · {selectedPoint.output}</p>
                 <span className="metaLabel">Dimensions</span>
@@ -381,6 +454,80 @@ function App() {
             )}
           </div>
         </aside>
+      </div>
+    </div>
+  );
+}
+
+function InputPlanSummary({
+  inputPlan,
+  status,
+  maxInputTokens,
+}: {
+  inputPlan: EmbeddingInputPlan | null;
+  status: PipelineStatus;
+  maxInputTokens: number;
+}) {
+  if (status.phase === "loading") {
+    return (
+      <div className="inputPlanPanel">
+        <div className="inputPlanHeader">
+          <span>Token plan</span>
+          <small>Counting...</small>
+        </div>
+        <div className="inputPlanProgress">
+          <span style={{ width: `${Math.round(status.progress * 100)}%` }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (status.phase === "error") {
+    return (
+      <div className="inputPlanPanel warning">
+        <div className="inputPlanHeader">
+          <span>Token plan</span>
+          <small>Error</small>
+        </div>
+        <p>{status.message}</p>
+      </div>
+    );
+  }
+
+  if (!inputPlan) {
+    return null;
+  }
+
+  return (
+    <div className="inputPlanPanel">
+      <div className="inputPlanHeader">
+        <span>Token plan</span>
+        <small>{inputPlan.totalChunks.toLocaleString()} plot points</small>
+      </div>
+      <div className="inputPlanStats">
+        <span>{inputPlan.totalTokens.toLocaleString()} tokens</span>
+        <span>{inputPlan.chunkSize.toLocaleString()} usable / {maxInputTokens.toLocaleString()} max</span>
+      </div>
+      <div className="inputPlanRows">
+        {inputPlan.items.length === 0 ? <p className="muted">No inputs selected.</p> : null}
+        {inputPlan.items.map((item) => (
+          <InputPlanRow item={item} key={item.id} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InputPlanRow({ item }: { item: InputPlanItem }) {
+  return (
+    <div className={`inputPlanRow ${item.status}`}>
+      <div>
+        <strong title={item.label}>{item.label}</strong>
+        <span>{item.message}</span>
+      </div>
+      <div>
+        <span>{item.tokenCount.toLocaleString()}</span>
+        <small>{item.chunkCount.toLocaleString()} chunks</small>
       </div>
     </div>
   );

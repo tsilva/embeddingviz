@@ -1,5 +1,16 @@
 import { AutoModelForCausalLM, AutoTokenizer, env, pipeline, type ProgressInfo } from "@huggingface/transformers";
-import type { EmbeddingPoint, InputType, ModelPreset, OutputMode, PipelineStatus, ReductionMethod, TextSnippet } from "../types";
+import type {
+  EmbeddingInputPlan,
+  EmbeddingPoint,
+  InputPlanItem,
+  InputType,
+  ModelPreset,
+  OutputMode,
+  PipelineStatus,
+  PlannedEmbeddingSample,
+  ReductionMethod,
+  TextSnippet,
+} from "../types";
 import { projectReduction } from "./reductions";
 
 env.allowRemoteModels = true;
@@ -13,14 +24,21 @@ type CausalLmBundle = {
 };
 type Tokenizer = Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>;
 const MAX_TOKEN_POINTS = 50000;
+const CHUNK_OVERLAP_TOKENS = 24;
 
 interface ResolvedSample {
   text: string;
   label: string;
+  parentLabel?: string;
   source: string;
   kind?: "input" | "token";
   tokenId?: number;
   rawToken?: string;
+  tokenCount?: number;
+  chunkIndex?: number;
+  chunkCount?: number;
+  tokenStart?: number;
+  tokenEnd?: number;
 }
 
 const extractorCache = new Map<string, Promise<FeatureExtractor>>();
@@ -34,6 +52,7 @@ export async function createEmbeddingRun({
   reduction,
   snippets,
   files,
+  inputPlan,
   onStatus,
 }: {
   model: ModelPreset;
@@ -42,12 +61,14 @@ export async function createEmbeddingRun({
   reduction: ReductionMethod;
   snippets: TextSnippet[];
   files: File[];
+  inputPlan?: EmbeddingInputPlan | null;
   onStatus: (status: PipelineStatus) => void;
 }) {
   validateCompatibility(model, inputType, outputMode);
   validateFiles(model, inputType, files);
 
-  const samples = await resolveSamples(inputType, snippets, files, model, onStatus);
+  const samples =
+    inputType === "tokens" ? await resolveSamples(inputType, snippets, files, model, onStatus) : resolvePlannedSamples(inputPlan);
   if (samples.length < 2) {
     throw new Error("Add at least two inputs before running a projection.");
   }
@@ -60,6 +81,7 @@ export async function createEmbeddingRun({
   const points: EmbeddingPoint[] = samples.map((sample, index) => ({
     id: `${Date.now()}-${index}`,
     label: sample.label,
+    parentLabel: sample.parentLabel,
     snippet: sample.text,
     source: sample.source,
     output: outputLabel(outputMode, model.task),
@@ -70,6 +92,11 @@ export async function createEmbeddingRun({
     kind: sample.kind,
     tokenId: sample.tokenId,
     rawToken: sample.rawToken,
+    tokenCount: sample.tokenCount,
+    chunkIndex: sample.chunkIndex,
+    chunkCount: sample.chunkCount,
+    tokenStart: sample.tokenStart,
+    tokenEnd: sample.tokenEnd,
   }));
 
   onStatus({
@@ -137,6 +164,117 @@ async function getCausalLm(modelId: string, onStatus: (status: PipelineStatus) =
   }
 
   return causalLmCache.get(modelId)!;
+}
+
+export async function buildEmbeddingInputPlan({
+  model,
+  inputType,
+  snippets,
+  files,
+  onStatus,
+}: {
+  model: ModelPreset;
+  inputType: Exclude<InputType, "tokens">;
+  snippets: TextSnippet[];
+  files: File[];
+  onStatus: (status: PipelineStatus) => void;
+}): Promise<EmbeddingInputPlan> {
+  validateCompatibility(model, inputType, model.recommendedOutput);
+  validateFiles(model, inputType, files);
+
+  onStatus({ phase: "loading", message: "Counting tokens", progress: 0.04 });
+  const tokenizer = await getTokenizer(model.id, onStatus);
+  const chunkSize = effectiveChunkSize(tokenizer, model);
+  const rawInputs = inputType === "files" ? await fileInputs(files) : snippetInputs(snippets);
+  const items: InputPlanItem[] = [];
+  const samples: PlannedEmbeddingSample[] = [];
+
+  for (const input of rawInputs) {
+    const normalized = normalizeText(input.text);
+    if (!normalized) {
+      items.push({
+        id: input.id,
+        label: input.label,
+        source: input.source,
+        tokenCount: 0,
+        chunkCount: 0,
+        status: "skipped" as const,
+        message: "Skipped empty input",
+      });
+      continue;
+    }
+
+    const tokenIds = tokenizer.encode(normalized, { add_special_tokens: false });
+    const chunks = chunkTokenIds(tokenIds, chunkSize);
+    const chunkCount = chunks.length;
+    const status = chunkCount > 1 ? "chunked" : "ready";
+    items.push({
+      id: input.id,
+      label: input.label,
+      source: input.source,
+      tokenCount: tokenIds.length,
+      chunkCount,
+      status,
+      message: status === "chunked" ? `${chunkCount.toLocaleString()} chunks with ${CHUNK_OVERLAP_TOKENS} token overlap` : "Fits in one model call",
+    });
+
+    chunks.forEach((chunk, index) => {
+      const chunkText = tokenizer.decode(chunk.ids, { skip_special_tokens: true }).trim() || normalized;
+      samples.push({
+        id: `${input.id}-${index}`,
+        text: chunkText,
+        label: input.label,
+        parentLabel: input.label,
+        source: input.source,
+        kind: "input",
+        tokenCount: chunk.ids.length,
+        chunkIndex: index + 1,
+        chunkCount,
+        tokenStart: chunk.start + 1,
+        tokenEnd: chunk.end,
+      });
+    });
+  }
+
+  const totalTokens = items.reduce((sum, item) => sum + item.tokenCount, 0);
+  const totalChunks = items.reduce((sum, item) => sum + item.chunkCount, 0);
+  const skippedCount = items.filter((item) => item.status === "skipped").length;
+  onStatus({
+    phase: "ready",
+    message: `${totalTokens.toLocaleString()} tokens · ${totalChunks.toLocaleString()} chunks`,
+    progress: 1,
+  });
+
+  return {
+    inputType,
+    modelId: model.id,
+    chunkSize,
+    overlapTokens: CHUNK_OVERLAP_TOKENS,
+    items,
+    samples,
+    totalTokens,
+    totalChunks,
+    skippedCount,
+  };
+}
+
+function resolvePlannedSamples(inputPlan?: EmbeddingInputPlan | null): ResolvedSample[] {
+  if (!inputPlan) {
+    throw new Error("Token count is still being prepared. Wait for the input plan before running.");
+  }
+
+  return inputPlan.samples.map((sample) => ({
+    text: sample.text,
+    label: sample.label,
+    parentLabel: sample.parentLabel,
+    source: sample.source,
+    kind: sample.kind,
+    tokenCount: sample.tokenCount,
+    chunkIndex: sample.chunkIndex,
+    chunkCount: sample.chunkCount,
+    tokenStart: sample.tokenStart,
+    tokenEnd: sample.tokenEnd,
+  }));
 }
 
 async function extractVectors(
@@ -228,6 +366,60 @@ async function resolveSamples(
       source: "Text snippets",
       kind: "input",
     }));
+}
+
+function snippetInputs(snippets: TextSnippet[]) {
+  return snippets.map((snippet, index) => {
+    const text = normalizeText(snippet.text);
+    return {
+      id: snippet.id,
+      text,
+      label: text ? trimText(text, 42) : `Snippet ${index + 1}`,
+      source: "Text snippets",
+    };
+  });
+}
+
+async function fileInputs(files: File[]) {
+  return Promise.all(
+    files.map(async (file) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}`,
+      text: await file.text(),
+      label: file.name,
+      source: file.name,
+    })),
+  );
+}
+
+function normalizeText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function effectiveChunkSize(tokenizer: Tokenizer, model: ModelPreset) {
+  const specialTokenCount = tokenizer.encode("", { add_special_tokens: true }).length;
+  return Math.max(8, model.maxInputTokens - specialTokenCount);
+}
+
+function chunkTokenIds(tokenIds: number[], chunkSize: number) {
+  if (tokenIds.length === 0) {
+    return [];
+  }
+
+  const overlap = Math.min(CHUNK_OVERLAP_TOKENS, Math.max(0, chunkSize - 1));
+  const stride = Math.max(1, chunkSize - overlap);
+  const chunks: Array<{ ids: number[]; start: number; end: number }> = [];
+
+  for (let start = 0; start < tokenIds.length; start += stride) {
+    const end = Math.min(start + chunkSize, tokenIds.length);
+    chunks.push({
+      ids: tokenIds.slice(start, end),
+      start,
+      end,
+    });
+    if (end === tokenIds.length) break;
+  }
+
+  return chunks;
 }
 
 function displayToken(token: string) {
