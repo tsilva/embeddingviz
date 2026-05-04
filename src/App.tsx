@@ -44,6 +44,7 @@ function App() {
   );
   const totalVisible = runs.filter((run) => run.visible).reduce((sum, run) => sum + run.count, 0);
   const effectiveInputType = outputMode === "tokens" ? "tokens" : inputType;
+  const isWorking = status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting";
 
   async function handleRun() {
     try {
@@ -149,16 +150,27 @@ function App() {
           <BrainCircuit size={16} />
           transformers.js local
         </div>
-        <div className={`statusPill ${status.phase}`}>
-          {status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting" ? <Loader2 size={15} className="spin" /> : <Check size={15} />}
-          {status.phase === "error" ? "Needs attention" : "Ready"}
+        <div className="topbarStatus" aria-live="polite">
+          <div className={`topbarStatusSegment primary ${status.phase}`}>
+            {isWorking ? <Loader2 size={16} className="spin" /> : status.phase === "error" ? <X size={16} /> : <Check size={16} />}
+            <span>{status.message}</span>
+          </div>
+          <div className="topbarStatusSegment">{totalVisible.toLocaleString()} visible points</div>
+          <div className="topbarStatusSegment">{runs[0]?.reduction ?? reduction} projected</div>
         </div>
 
-        <button className="runButton" type="button" onClick={handleRun} disabled={status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting"}>
-          {status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting" ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
+        <button className="runButton" type="button" onClick={handleRun} disabled={isWorking}>
+          {isWorking ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
           Run
         </button>
-        <div className="progressTrack" aria-hidden="true">
+        <div
+          className={`progressTrack ${isWorking ? "active" : ""}`}
+          role="progressbar"
+          aria-label="Embedding run progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(status.progress * 100)}
+        >
           <span style={{ width: `${Math.round(status.progress * 100)}%` }} />
         </div>
       </header>
@@ -346,15 +358,6 @@ function App() {
           </div>
         </aside>
       </div>
-
-      <footer className="statusBar">
-        <div className="statusSegment">
-          <Check size={18} />
-          <span>{status.message}</span>
-        </div>
-        <div className="statusSegment">{totalVisible} visible points</div>
-        <div className="statusSegment">{runs[0]?.reduction ?? reduction} projected</div>
-      </footer>
     </div>
   );
 }

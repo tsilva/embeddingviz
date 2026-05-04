@@ -49,7 +49,7 @@ button {
 .appShell {
   display: grid;
   min-height: 100vh;
-  grid-template-rows: 62px minmax(0, 1fr) 76px;
+  grid-template-rows: 62px minmax(0, 1fr);
   background: #f8fafc;
 }
 
@@ -67,8 +67,9 @@ button {
 .brand {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 14px;
-  min-width: 210px;
+  min-width: 205px;
   color: var(--text);
   font-size: 20px;
   font-weight: 700;
@@ -88,8 +89,7 @@ button {
   background: #111827;
 }
 
-.runtimeChip,
-.statusPill {
+.runtimeChip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -99,16 +99,66 @@ button {
   background: #fff;
   padding: 0 12px;
   color: #1e293b;
+  flex: 0 0 auto;
   font-size: 14px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
-.statusPill {
-  margin-left: auto;
+.topbarStatus {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.4fr) minmax(132px, 0.7fr) minmax(128px, 0.7fr);
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 38px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.topbarStatusSegment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  border-right: 1px solid var(--border);
+  padding: 0 18px;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.topbarStatusSegment:last-child {
+  border-right: 0;
+}
+
+.topbarStatusSegment.primary {
+  justify-content: flex-start;
+  gap: 9px;
+}
+
+.topbarStatusSegment.primary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbarStatusSegment.primary svg {
+  flex: 0 0 auto;
   color: var(--green);
 }
 
-.statusPill.error {
+.topbarStatusSegment.primary.loading svg,
+.topbarStatusSegment.primary.embedding svg,
+.topbarStatusSegment.primary.projecting svg {
+  color: var(--blue);
+}
+
+.topbarStatusSegment.primary.error svg {
   color: var(--rose);
 }
 
@@ -251,16 +301,18 @@ button {
 }
 
 .segmented {
+  --segmented-radius: 7px;
   display: grid;
   grid-auto-columns: 1fr;
   grid-auto-flow: column;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--segmented-radius);
   background: #fff;
 }
 
 .segmented button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -272,6 +324,7 @@ button {
   color: #1e293b;
   font-size: 13px;
   font-weight: 600;
+  outline: none;
 }
 
 .segmented button:last-child {
@@ -280,8 +333,36 @@ button {
 
 .segmented button.active {
   background: var(--blue-soft);
-  box-shadow: inset 0 0 0 1px var(--blue);
   color: var(--blue);
+  z-index: 1;
+}
+
+.segmented button.active::after,
+.segmented button:focus-visible::after {
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--blue);
+  content: "";
+  pointer-events: none;
+}
+
+.segmented button:focus-visible {
+  z-index: 2;
+}
+
+.segmented button:first-child.active::after,
+.segmented button:first-child:focus-visible::after {
+  border-radius: var(--segmented-radius) 0 0 var(--segmented-radius);
+}
+
+.segmented button:last-child.active::after,
+.segmented button:last-child:focus-visible::after {
+  border-radius: 0 var(--segmented-radius) var(--segmented-radius) 0;
+}
+
+.segmented button:first-child:last-child.active::after,
+.segmented button:first-child:last-child:focus-visible::after {
+  border-radius: var(--segmented-radius);
 }
 
 .segmented.small {
@@ -417,7 +498,7 @@ button {
 .plotCanvas {
   position: relative;
   width: 100%;
-  height: calc(100vh - 216px);
+  height: calc(100vh - 162px);
   min-height: 565px;
   border-radius: 4px;
   background:
@@ -668,47 +749,12 @@ button {
   font-weight: 600;
 }
 
-.statusBar {
-  display: grid;
-  grid-template-columns: 1.15fr 0.8fr 1fr;
-  align-items: center;
-  gap: 0;
-  border-top: 1px solid var(--border);
-  background: #fff;
-  margin: 0;
-  padding: 16px 20px 18px;
-}
-
-.statusSegment {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  min-height: 38px;
-  border-right: 1px solid var(--border);
-  padding: 0 30px;
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.statusSegment:first-child {
-  padding-left: 0;
-}
-
-.statusSegment:last-of-type {
-  border-right: 0;
-}
-
-.statusSegment svg {
-  color: var(--green);
-}
-
 .progressTrack {
   position: absolute;
   left: 0;
   right: 0;
   bottom: -1px;
-  height: 3px;
+  height: 4px;
   overflow: hidden;
   border-radius: 0;
   background: #eef2f7;
@@ -720,6 +766,10 @@ button {
   border-radius: inherit;
   background: linear-gradient(90deg, #2563eb, #14b8a6);
   transition: width 0.25s ease;
+}
+
+.progressTrack.active span {
+  background: linear-gradient(90deg, #2563eb, #14b8a6, #f59e0b);
 }
 
 .spin {
@@ -743,6 +793,14 @@ button {
 
   .runtimeChip {
     display: none;
+  }
+
+  .topbarStatus {
+    grid-template-columns: minmax(170px, 1.35fr) minmax(132px, 0.8fr) minmax(128px, 0.7fr);
+  }
+
+  .topbarStatusSegment {
+    padding: 0 14px;
   }
 
   .plotToolbar {
