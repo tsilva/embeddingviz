@@ -64,7 +64,7 @@ export function ScatterPlot({
   const filtered = useMemo(() => {
     const normalizedQuery = query.toLowerCase();
     return points.filter(({ point }) => {
-      const target = `${point.label} ${point.snippet} ${point.group}`.toLowerCase();
+      const target = `${point.label} ${point.snippet} ${point.source}`.toLowerCase();
       return target.includes(normalizedQuery);
     });
   }, [points, query]);
@@ -207,14 +207,6 @@ export function ScatterPlot({
           </button>
         </div>
 
-        <label className="selectControl colorBy">
-          <span>Color by</span>
-          <select aria-label="Color by">
-            <option>Group</option>
-            <option>Run</option>
-            <option>Output</option>
-          </select>
-        </label>
       </div>
 
       <div className="plotCanvas">
@@ -295,7 +287,7 @@ function SelectedPointOverlay({ selected, axisPrefix }: { selected: ProjectedPoi
     <>
       <circle className="selectedPointRing" cx={cx} cy={cy} r="8" fill={color} />
       <g transform={`translate(${Math.min(cx + 34, WIDTH - 246)} ${Math.max(cy - 20, 74)})`}>
-        <rect className="tooltipPanel" width="218" height="128" rx="8" filter="url(#tooltipShadow)" />
+        <rect className="tooltipPanel" width="218" height="104" rx="8" filter="url(#tooltipShadow)" />
         <circle cx="20" cy="24" r="6" fill={color} />
         <text className="tooltipTitle" x="36" y="29">
           {point.label}
@@ -307,21 +299,15 @@ function SelectedPointOverlay({ selected, axisPrefix }: { selected: ProjectedPoi
           {point.output}
         </text>
         <text className="tooltipKey" x="18" y="84">
-          Group
-        </text>
-        <text className="tooltipBadge" x="78" y="84">
-          {point.group}
-        </text>
-        <text className="tooltipKey" x="18" y="110">
           {axisPrefix} 1
         </text>
-        <text className="tooltipValue" x="78" y="110">
+        <text className="tooltipValue" x="78" y="84">
           {point.x.toFixed(2)}
         </text>
-        <text className="tooltipKey" x="132" y="110">
+        <text className="tooltipKey" x="132" y="84">
           {axisPrefix} 2
         </text>
-        <text className="tooltipValue" x="174" y="110">
+        <text className="tooltipValue" x="174" y="84">
           {point.y.toFixed(2)}
         </text>
       </g>

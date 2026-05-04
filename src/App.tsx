@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 import {
   BrainCircuit,
   Check,
   ChevronDown,
   Database,
   FileText,
-  Image,
   Loader2,
   Play,
   Plus,
@@ -27,6 +26,7 @@ function App() {
   const [reduction, setReduction] = useState<ReductionMethod>("PCA");
   const [snippets, setSnippets] = useState<TextSnippet[]>(SAMPLE_SNIPPETS.slice(0, 3));
   const [files, setFiles] = useState<File[]>([]);
+  const [fileMessage, setFileMessage] = useState("");
   const [runs, setRuns] = useState<RunRecord[]>(initialRuns);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -38,12 +38,13 @@ function App() {
   });
 
   const model = useMemo(() => MODEL_PRESETS.find((preset) => preset.id === modelId) ?? MODEL_PRESETS[0], [modelId]);
+  const activeOutputMode = model.outputModes.includes(outputMode) ? outputMode : model.recommendedOutput;
   const selectedPoint = useMemo(
     () => runs.flatMap((run) => run.points).find((point) => point.id === selectedPointId) ?? runs[0]?.points[0] ?? null,
     [runs, selectedPointId],
   );
   const totalVisible = runs.filter((run) => run.visible).reduce((sum, run) => sum + run.count, 0);
-  const effectiveInputType = outputMode === "tokens" ? "tokens" : inputType;
+  const effectiveInputType = activeOutputMode === "tokens" ? "tokens" : inputType;
   const isWorking = status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting";
 
   async function handleRun() {
@@ -51,7 +52,7 @@ function App() {
       setStatus({ phase: "loading", message: "Preparing model", progress: 0.02 });
       const result = await createEmbeddingRun({
         model,
-        outputMode,
+        outputMode: activeOutputMode,
         inputType: effectiveInputType,
         reduction,
         snippets,
@@ -64,7 +65,7 @@ function App() {
         id: `${Date.now()}`,
         name: runName(effectiveInputType),
         model: model.label,
-        output: outputLabel(outputMode, model.task),
+        output: outputLabel(activeOutputMode, model.task),
         reduction,
         color: runColor(runIndex),
         count: result.points.length,
@@ -84,8 +85,8 @@ function App() {
     }
   }
 
-  function updateSnippet(id: string, field: "text" | "label", value: string) {
-    setSnippets((current) => current.map((snippet) => (snippet.id === id ? { ...snippet, [field]: value } : snippet)));
+  function updateSnippet(id: string, value: string) {
+    setSnippets((current) => current.map((snippet) => (snippet.id === id ? { ...snippet, text: value } : snippet)));
   }
 
   function addSnippet() {
@@ -94,8 +95,6 @@ function App() {
       {
         id: crypto.randomUUID(),
         text: "",
-        label: "",
-        group: "ML / NLP",
       },
     ]);
   }
@@ -112,22 +111,50 @@ function App() {
     const next = MODEL_PRESETS.find((preset) => preset.id === nextModelId) ?? MODEL_PRESETS[0];
     setModelId(next.id);
     setOutputMode(next.recommendedOutput);
-    if (inputType === "images" && !next.supportsImages) {
-      setInputType("text");
+    const compatibleFiles = files.filter((file) => isFileCompatibleWithModel(file, next));
+    if (compatibleFiles.length !== files.length) {
+      setFiles(compatibleFiles);
+      const rejected = files.length - compatibleFiles.length;
+      setFileMessage(`${rejected} selected ${rejected === 1 ? "file is" : "files are"} incompatible with ${next.label}.`);
     }
   }
 
   function chooseInputType(nextInputType: InputType) {
     setInputType(nextInputType);
     if (nextInputType === "tokens") {
-      setOutputMode("tokens");
-    } else if (outputMode === "tokens") {
+      setOutputMode(model.outputModes.includes("tokens") ? "tokens" : model.recommendedOutput);
+    } else if (activeOutputMode === "tokens") {
       setOutputMode(model.recommendedOutput === "tokens" ? "final" : model.recommendedOutput);
     }
   }
 
   function chooseOutputMode(nextOutputMode: OutputMode) {
-    setOutputMode(nextOutputMode);
+    if (model.outputModes.includes(nextOutputMode)) {
+      setOutputMode(nextOutputMode);
+    }
+  }
+
+  function handleFilesSelected(nextFiles: File[]) {
+    const compatibleFiles = nextFiles.filter((file) => isFileCompatibleWithModel(file, model));
+    const rejectedCount = nextFiles.length - compatibleFiles.length;
+
+    setFiles(compatibleFiles);
+    if (rejectedCount > 0) {
+      setFileMessage(`${rejectedCount} ${rejectedCount === 1 ? "file was" : "files were"} not added because ${model.label} cannot embed that MIME type.`);
+    } else {
+      setFileMessage("");
+    }
+  }
+
+  function handleFileDragOver(event: DragEvent<HTMLDivElement>) {
+    const canDrop = Array.from(event.dataTransfer.items).some((item) => item.kind === "file" && isMimeCompatibleWithModel(item.type, model));
+    event.preventDefault();
+    event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
+  }
+
+  function handleFileDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    handleFilesSelected(Array.from(event.dataTransfer.files));
   }
 
   return (
@@ -202,10 +229,12 @@ function App() {
               Output
             </label>
             <div className="selectShell">
-              <select id="output" value={outputMode} onChange={(event) => chooseOutputMode(event.target.value as OutputMode)}>
-                <option value="final">Final embedding</option>
-                <option value="hidden-4">Layer 4 · hidden state</option>
-                <option value="tokens">Token table · embeddings</option>
+              <select id="output" value={activeOutputMode} onChange={(event) => chooseOutputMode(event.target.value as OutputMode)}>
+                {model.outputModes.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {outputLabel(mode, model.task)}
+                  </option>
+                ))}
               </select>
               <ChevronDown size={16} />
             </div>
@@ -215,7 +244,7 @@ function App() {
             </p>
           </section>
 
-          {outputMode === "tokens" ? (
+          {activeOutputMode === "tokens" ? (
             <section className="controlSection">
               <span className="fieldLabel">Token table</span>
               <p className="notice tokenModeNotice">Plots the tokenizer vocabulary with a WebGL point layer.</p>
@@ -234,10 +263,6 @@ function App() {
                   <FileText size={15} />
                   Files
                 </button>
-                <button className={inputType === "images" ? "active" : ""} type="button" onClick={() => chooseInputType("images")}>
-                  <Image size={15} />
-                  Images
-                </button>
               </div>
 
               {inputType === "text" ? (
@@ -248,7 +273,7 @@ function App() {
                   </div>
                   {snippets.map((snippet) => (
                     <div className="snippetItem" key={snippet.id}>
-                      <input value={snippet.text} onChange={(event) => updateSnippet(snippet.id, "text", event.target.value)} aria-label="Snippet text" />
+                      <input value={snippet.text} onChange={(event) => updateSnippet(snippet.id, event.target.value)} aria-label="Snippet text" />
                       <button type="button" title="Remove snippet" onClick={() => removeSnippet(snippet.id)}>
                         <X size={15} />
                       </button>
@@ -262,18 +287,17 @@ function App() {
               ) : null}
 
               {inputType === "files" ? (
-                <div className="fileDrop">
+                <div className="fileDrop" onDragOver={handleFileDragOver} onDrop={handleFileDrop}>
                   <input
                     type="file"
                     multiple
-                    accept=".txt,.md,.csv,.json"
-                    onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+                    accept={fileAcceptValue(model)}
+                    onChange={(event) => handleFilesSelected(Array.from(event.target.files ?? []))}
                   />
-                  <span>{files.length ? `${files.length} files selected` : "Choose text files"}</span>
+                  <span>{files.length ? selectedFileLabel(files) : `Drop or choose ${acceptedFileLabel(model)}`}</span>
+                  <small>{fileMessage || `Accepts ${acceptedFileLabel(model)} for ${model.label}.`}</small>
                 </div>
               ) : null}
-
-              {inputType === "images" ? <p className="notice">Image inputs require an image-feature-extraction model.</p> : null}
             </section>
           )}
 
@@ -340,7 +364,7 @@ function App() {
             <h2>Selected point</h2>
             {selectedPoint ? (
               <>
-                <span className="metaLabel">{selectedPoint.kind === "token" ? "Subword token" : "Label / Snippet"}</span>
+                <span className="metaLabel">{selectedPoint.kind === "token" ? "Subword token" : "Label"}</span>
                 <strong>{selectedPoint.label}</strong>
                 <p>
                   {selectedPoint.kind === "token"
@@ -364,8 +388,7 @@ function App() {
 
 function runName(inputType: InputType) {
   if (inputType === "tokens") return "Token table";
-  if (inputType === "files") return "Text files";
-  if (inputType === "images") return "Images";
+  if (inputType === "files") return "Files";
   return "Text snippets";
 }
 
@@ -378,6 +401,59 @@ function outputLabel(outputMode: OutputMode, task?: typeof MODEL_PRESETS[number]
   if (outputMode === "hidden-4") return "Layer 4 · hidden state";
   if (outputMode === "tokens") return "Token table · embeddings";
   return "Final embedding";
+}
+
+function classifyFileMime(mimeType: string): "text" | "image" | "unsupported" {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("text/")) return "text";
+  if (["application/json", "application/csv", "application/xml", "application/x-ndjson"].includes(mimeType)) return "text";
+  return "unsupported";
+}
+
+function classifyFile(file: File) {
+  const mimeKind = classifyFileMime(file.type);
+  if (mimeKind !== "unsupported") return mimeKind;
+  if (/\.(txt|md|csv|json|jsonl|ndjson|xml)$/i.test(file.name)) return "text";
+  return "unsupported";
+}
+
+function isMimeCompatibleWithModel(mimeType: string, model: typeof MODEL_PRESETS[number]) {
+  const kind = classifyFileMime(mimeType);
+  if (kind === "image") return model.supportsImages;
+  if (kind === "text") return model.task !== "image-feature-extraction";
+  return false;
+}
+
+function isFileCompatibleWithModel(file: File, model: typeof MODEL_PRESETS[number]) {
+  const kind = classifyFile(file);
+  if (kind === "image") return model.supportsImages;
+  if (kind === "text") return model.task !== "image-feature-extraction";
+  return false;
+}
+
+function fileAcceptValue(model: typeof MODEL_PRESETS[number]) {
+  return model.supportsImages ? "image/*" : ".txt,.md,.csv,.json,.jsonl,.ndjson,text/*,application/json,application/csv";
+}
+
+function acceptedFileLabel(model: typeof MODEL_PRESETS[number]) {
+  return model.supportsImages ? "image files" : "text, Markdown, CSV, or JSON files";
+}
+
+function selectedFileLabel(files: File[]) {
+  const counts = files.reduce(
+    (result, file) => {
+      const kind = classifyFile(file);
+      if (kind === "image") result.images += 1;
+      if (kind === "text") result.text += 1;
+      return result;
+    },
+    { images: 0, text: 0 },
+  );
+
+  const parts = [];
+  if (counts.text) parts.push(`${counts.text} text`);
+  if (counts.images) parts.push(`${counts.images} image`);
+  return `${parts.join(" · ")} ${files.length === 1 ? "file" : "files"} selected`;
 }
 
 export default App;

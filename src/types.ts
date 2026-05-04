@@ -1,19 +1,16 @@
-export type InputType = "text" | "files" | "images" | "tokens";
+export type InputType = "text" | "files" | "tokens";
 export type ReductionMethod = "PCA" | "UMAP" | "t-SNE";
 export type OutputMode = "final" | "hidden-4" | "tokens";
 
 export interface TextSnippet {
   id: string;
   text: string;
-  label: string;
-  group: string;
 }
 
 export interface EmbeddingPoint {
   id: string;
   label: string;
   snippet: string;
-  group: string;
   source: string;
   output: string;
   vector: ArrayLike<number>;
@@ -44,6 +41,7 @@ export interface ModelPreset {
   task: "feature-extraction" | "text-generation" | "image-feature-extraction";
   summary: string;
   recommendedOutput: OutputMode;
+  outputModes: OutputMode[];
   supportsImages: boolean;
   note: string;
 }

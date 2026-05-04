@@ -414,6 +414,7 @@ button {
   position: relative;
   display: grid;
   place-items: center;
+  gap: 6px;
   min-height: 106px;
   margin-top: 14px;
   border: 1px dashed var(--border-strong);
@@ -422,6 +423,8 @@ button {
   color: var(--muted);
   font-size: 13px;
   font-weight: 600;
+  padding: 18px;
+  text-align: center;
 }
 
 .fileDrop input {
@@ -429,6 +432,13 @@ button {
   inset: 0;
   opacity: 0;
   cursor: pointer;
+}
+
+.fileDrop small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
 }
 
 .plotRegion {
@@ -475,19 +485,6 @@ button {
 .iconGroup button {
   width: 38px;
   height: 38px;
-}
-
-.colorBy {
-  display: grid;
-  gap: 5px;
-  width: 160px;
-  margin-left: auto;
-}
-
-.colorBy span {
-  color: #0f172a;
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .selectControl select {
@@ -599,12 +596,6 @@ button {
   fill: #0f172a;
   font-size: 12px;
   font-weight: 600;
-}
-
-.tooltipBadge {
-  fill: var(--blue);
-  font-size: 12px;
-  font-weight: 800;
 }
 
 .emptyPlot {
@@ -808,7 +799,4 @@ button {
     height: auto;
   }
 
-  .colorBy {
-    margin-left: 0;
-  }
 }

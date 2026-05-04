@@ -17,7 +17,6 @@ const MAX_TOKEN_POINTS = 50000;
 interface ResolvedSample {
   text: string;
   label: string;
-  group: string;
   source: string;
   kind?: "input" | "token";
   tokenId?: number;
@@ -45,7 +44,8 @@ export async function createEmbeddingRun({
   files: File[];
   onStatus: (status: PipelineStatus) => void;
 }) {
-  validateCompatibility(model, inputType);
+  validateCompatibility(model, inputType, outputMode);
+  validateFiles(model, inputType, files);
 
   const samples = await resolveSamples(inputType, snippets, files, model, onStatus);
   if (samples.length < 2) {
@@ -61,7 +61,6 @@ export async function createEmbeddingRun({
     id: `${Date.now()}-${index}`,
     label: sample.label,
     snippet: sample.text,
-    group: sample.group,
     source: sample.source,
     output: outputLabel(outputMode, model.task),
     vector: vectors[index],
@@ -202,7 +201,6 @@ async function resolveSamples(
     return resolveTokenSamples(tokenizer.get_vocab()).map(([token, tokenId]) => ({
       text: token,
       label: displayToken(token),
-      group: "Tokens",
       source: `Token id ${tokenId}`,
       kind: "token",
       tokenId,
@@ -215,7 +213,6 @@ async function resolveSamples(
       files.map(async (file) => ({
         text: trimText(await file.text(), 260),
         label: file.name,
-        group: "Files",
         source: file.name,
         kind: "input" as const,
       })),
@@ -227,8 +224,7 @@ async function resolveSamples(
     .filter((snippet) => snippet.text.trim().length > 0)
     .map((snippet) => ({
       text: snippet.text.trim(),
-      label: snippet.label.trim() || trimText(snippet.text, 42),
-      group: snippet.group,
+      label: snippet.text.trim(),
       source: "Text snippets",
       kind: "input",
     }));
@@ -282,13 +278,26 @@ function meanPool(rows: number[][]) {
   return pooled.map((value) => value / Math.max(rows.length, 1));
 }
 
-function validateCompatibility(model: ModelPreset, inputType: InputType) {
-  if (inputType === "images" && !model.supportsImages) {
-    throw new Error("The selected model does not expose image embeddings. Choose an image-capable model first.");
+function validateCompatibility(model: ModelPreset, inputType: InputType, outputMode: OutputMode) {
+  if (!model.outputModes.includes(outputMode)) {
+    throw new Error(`${model.label} does not expose ${outputLabel(outputMode, model.task).toLowerCase()}.`);
+  }
+
+  if (inputType === "tokens" && !model.outputModes.includes("tokens")) {
+    throw new Error(`${model.label} does not expose token embedding layers.`);
   }
 
   if (model.task === "image-feature-extraction") {
     throw new Error(`${model.label} is image-capable, but image embedding extraction is not wired into this MVP path yet.`);
+  }
+}
+
+function validateFiles(model: ModelPreset, inputType: InputType, files: File[]) {
+  if (inputType !== "files") return;
+
+  const incompatibleFiles = files.filter((file) => !isFileCompatibleWithModel(file, model));
+  if (incompatibleFiles.length > 0) {
+    throw new Error(`${model.label} cannot embed ${incompatibleFiles[0].type || incompatibleFiles[0].name}.`);
   }
 }
 
@@ -343,6 +352,27 @@ function inferLastLayer(outputs: Record<string, unknown>) {
     .filter((value): value is string => Boolean(value))
     .map(Number);
   return layers.length ? Math.max(...layers) : 4;
+}
+
+function classifyFileMime(mimeType: string): "text" | "image" | "unsupported" {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("text/")) return "text";
+  if (["application/json", "application/csv", "application/xml", "application/x-ndjson"].includes(mimeType)) return "text";
+  return "unsupported";
+}
+
+function classifyFile(file: File) {
+  const mimeKind = classifyFileMime(file.type);
+  if (mimeKind !== "unsupported") return mimeKind;
+  if (/\.(txt|md|csv|json|jsonl|ndjson|xml)$/i.test(file.name)) return "text";
+  return "unsupported";
+}
+
+function isFileCompatibleWithModel(file: File, model: ModelPreset) {
+  const kind = classifyFile(file);
+  if (kind === "image") return model.supportsImages;
+  if (kind === "text") return model.task !== "image-feature-extraction";
+  return false;
 }
 
 function tokenizerFeatureVectors(samples: ResolvedSample[]) {
