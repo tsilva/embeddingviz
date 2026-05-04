@@ -186,12 +186,13 @@ button {
 .workspace {
   display: grid;
   min-height: 0;
-  grid-template-columns: 345px minmax(640px, 1fr) 344px;
+  grid-template-columns: minmax(300px, 345px) minmax(540px, 1fr) minmax(300px, 344px);
 }
 
 .leftPanel,
 .rightPanel {
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--panel);
 }
 
@@ -369,15 +370,24 @@ button {
   width: 112px;
 }
 
-.snippetList {
+.inputStack {
   margin-top: 18px;
+}
+
+.inputItemCard {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  border: 1px solid #edf2f7;
+  border-radius: 7px;
+  background: var(--panel-soft);
+  padding: 9px;
 }
 
 .snippetItem {
   display: grid;
   grid-template-columns: 1fr 32px;
   gap: 6px;
-  margin-top: 10px;
 }
 
 .snippetItem input {
@@ -441,7 +451,61 @@ button {
   line-height: 1.35;
 }
 
-.inputPlanPanel {
+.fileItemList {
+  display: grid;
+  gap: 10px;
+}
+
+.fileItemCard {
+  margin-top: 0;
+}
+
+.fileItem {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 32px;
+  gap: 8px;
+  align-items: center;
+}
+
+.fileItem > svg {
+  color: var(--blue);
+}
+
+.fileItem strong,
+.fileItem span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileItem strong {
+  color: #111827;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.fileItem span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.fileItem button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+}
+
+.tokenPlanCard {
   display: grid;
   gap: 10px;
   margin-top: 14px;
@@ -451,89 +515,51 @@ button {
   padding: 12px;
 }
 
-.inputPlanPanel.warning {
+.tokenPlanCard.compact {
+  gap: 8px;
+}
+
+.tokenPlanCard.warning {
   border-color: rgba(244, 63, 114, 0.38);
   background: #fff7f9;
 }
 
-.inputPlanPanel p {
+.tokenPlanCard p {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
 }
 
-.inputPlanHeader,
+.tokenPlanTitle,
 .inputPlanStats,
-.inputPlanRow {
+.inputItemMeta {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.inputPlanHeader span {
+.tokenPlanTitle span {
   color: #111827;
   font-size: 13px;
   font-weight: 800;
 }
 
-.inputPlanHeader small,
+.tokenPlanTitle small,
 .inputPlanStats,
-.inputPlanRow span,
-.inputPlanRow small {
+.inputItemMeta span,
+.inputItemMeta small {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
 
 .inputPlanStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: flex-start;
-}
-
-.inputPlanRows {
-  display: grid;
-  gap: 8px;
-}
-
-.inputPlanRow {
-  min-width: 0;
-  border: 1px solid #edf2f7;
-  border-radius: 6px;
-  background: var(--panel-soft);
-  padding: 9px 10px;
-}
-
-.inputPlanRow.chunked {
-  border-color: rgba(37, 99, 235, 0.25);
-  background: var(--blue-soft);
-}
-
-.inputPlanRow.skipped {
-  opacity: 0.7;
-}
-
-.inputPlanRow > div:first-child {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.inputPlanRow strong {
-  min-width: 0;
-  overflow: hidden;
-  color: #111827;
-  font-size: 12px;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.inputPlanRow > div:last-child {
-  display: grid;
-  flex: 0 0 auto;
-  gap: 2px;
-  text-align: right;
+  gap: 5px 12px;
 }
 
 .inputPlanProgress {
@@ -548,6 +574,49 @@ button {
   height: 100%;
   border-radius: inherit;
   background: var(--blue);
+}
+
+.inputItemMeta {
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 5px 7px;
+}
+
+.inputItemMeta span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  padding: 3px 7px;
+  color: #334155;
+  line-height: 1;
+}
+
+.inputItemMeta small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inputItemMeta.ready span:first-child,
+.inputItemMeta.image span:first-child {
+  border-color: rgba(20, 184, 166, 0.3);
+  background: rgba(20, 184, 166, 0.08);
+  color: #0f766e;
+}
+
+.inputItemMeta.chunked span {
+  border-color: rgba(37, 99, 235, 0.25);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.inputItemMeta.skipped span {
+  border-color: rgba(244, 63, 114, 0.25);
+  background: #fff7f9;
+  color: var(--rose);
 }
 
 .plotRegion {
@@ -690,9 +759,14 @@ button {
 }
 
 .tooltipTitle {
-  fill: #0f172a;
+  width: 100%;
+  overflow: hidden;
+  color: #0f172a;
   font-size: 15px;
   font-weight: 800;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tooltipKey {
@@ -896,14 +970,6 @@ button {
   accent-color: var(--blue);
 }
 
-.nearestLimit {
-  width: 142px;
-}
-
-.nearestLimit button {
-  height: 31px;
-}
-
 .nearestGroups {
   display: grid;
   gap: 12px;
@@ -957,7 +1023,7 @@ button {
   gap: 10px;
   align-items: center;
   width: 100%;
-  min-height: 45px;
+  min-height: 58px;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: #fff;
@@ -973,7 +1039,7 @@ button {
   outline: none;
 }
 
-.nearestRow span {
+.nearestRowText {
   display: grid;
   min-width: 0;
   gap: 2px;
@@ -1000,6 +1066,18 @@ button {
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
+}
+
+.nearestRunLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.nearestRunLine .swatch {
+  width: 8px;
+  height: 8px;
+  margin-top: 0;
 }
 
 .nearestRow code {

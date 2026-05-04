@@ -18,7 +18,7 @@ export interface EmbeddingPoint {
   x: number;
   y: number;
   z: number;
-  kind?: "input" | "token";
+  kind?: "input" | "token" | "image";
   tokenId?: number;
   rawToken?: string;
   tokenCount?: number;

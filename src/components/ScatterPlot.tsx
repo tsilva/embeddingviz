@@ -43,6 +43,7 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 12;
 const ZOOM_STEP = 1.35;
 const INITIAL_VIEW: ViewState = { scale: 1, offsetX: 0, offsetY: 0 };
+const TOOLTIP_TITLE_WIDTH = 166;
 
 export function ScatterPlot({
   runs,
@@ -57,6 +58,7 @@ export function ScatterPlot({
 }: ScatterPlotProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; startView: ViewState; moved: boolean } | null>(null);
+  const primaryButtonDownRef = useRef(false);
   const [view, setView] = useState<ViewState>(INITIAL_VIEW);
   const points = useMemo<PlotPoint[]>(
     () => runs.filter((run) => run.visible).flatMap((run) => run.points.map((point) => ({ point, color: run.color }))),
@@ -128,6 +130,8 @@ export function ScatterPlot({
   }
 
   function handleCanvasWheel(event: React.WheelEvent<HTMLCanvasElement>) {
+    if (!primaryButtonDownRef.current) return;
+
     event.preventDefault();
     const { x, y } = canvasPoint(event);
     const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
@@ -135,6 +139,9 @@ export function ScatterPlot({
   }
 
   function handleCanvasMouseDown(event: React.MouseEvent<HTMLCanvasElement>) {
+    if (event.button !== 0) return;
+
+    primaryButtonDownRef.current = true;
     const { x, y } = canvasPoint(event);
     dragRef.current = { startX: x, startY: y, startView: view, moved: false };
   }
@@ -156,6 +163,7 @@ export function ScatterPlot({
   }
 
   function handleCanvasMouseUp() {
+    primaryButtonDownRef.current = false;
     window.setTimeout(() => {
       dragRef.current = null;
     }, 0);
@@ -293,9 +301,11 @@ function SelectedPointOverlay({ selected, axisPrefix }: { selected: ProjectedPoi
       <g transform={`translate(${Math.min(cx + 34, WIDTH - 246)} ${Math.max(cy - 20, 74)})`}>
         <rect className="tooltipPanel" width="218" height="104" rx="8" filter="url(#tooltipShadow)" />
         <circle cx="20" cy="24" r="6" fill={color} />
-        <text className="tooltipTitle" x="36" y="29">
-          {point.label}
-        </text>
+        <foreignObject x="36" y="12" width={TOOLTIP_TITLE_WIDTH} height="24">
+          <div className="tooltipTitle" data-testid="selected-point-tooltip-label" title={point.label}>
+            {point.label}
+          </div>
+        </foreignObject>
         <text className="tooltipKey" x="18" y="58">
           Output
         </text>

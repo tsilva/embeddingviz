@@ -14,6 +14,7 @@ import type {
 
 type TransformersModule = typeof import("@huggingface/transformers");
 type FeatureExtractor = (texts: string[], options: { pooling: string; normalize: boolean }) => Promise<{ tolist(): unknown }>;
+type ImageFeatureExtractor = (images: File[], options?: { pool?: boolean }) => Promise<{ tolist(): unknown }>;
 type Tokenizer = {
   encode: (text: string, options?: { add_special_tokens?: boolean }) => number[];
   decode: (ids: number[], options?: { skip_special_tokens?: boolean }) => string;
@@ -36,7 +37,8 @@ interface ResolvedSample {
   label: string;
   parentLabel?: string;
   source: string;
-  kind?: "input" | "token";
+  kind?: "input" | "token" | "image";
+  image?: File;
   tokenId?: number;
   rawToken?: string;
   tokenCount?: number;
@@ -47,6 +49,7 @@ interface ResolvedSample {
 }
 
 const extractorCache = new Map<string, Promise<FeatureExtractor>>();
+const imageExtractorCache = new Map<string, Promise<ImageFeatureExtractor>>();
 const causalLmCache = new Map<string, Promise<CausalLmBundle>>();
 const tokenizerCache = new Map<string, Promise<Tokenizer>>();
 let transformersPromise: Promise<TransformersModule> | null = null;
@@ -87,7 +90,9 @@ export async function createEmbeddingRun({
   validateFiles(model, inputType, files);
 
   const samples =
-    inputType === "tokens" ? await resolveSamples(inputType, snippets, files, model, onStatus) : resolvePlannedSamples(inputPlan);
+    inputType === "tokens" || model.task === "image-feature-extraction"
+      ? await resolveSamples(inputType, snippets, files, model, onStatus)
+      : resolvePlannedSamples(inputPlan);
   if (samples.length < 2) {
     throw new Error("Add at least two inputs before running a projection.");
   }
@@ -154,6 +159,22 @@ async function getExtractor(modelId: string, onStatus: (status: PipelineStatus) 
   }
 
   return extractorCache.get(modelId)!;
+}
+
+async function getImageExtractor(modelId: string, onStatus: (status: PipelineStatus) => void) {
+  if (!imageExtractorCache.has(modelId)) {
+    imageExtractorCache.set(
+      modelId,
+      loadTransformers().then(({ pipeline }) =>
+        pipeline("image-feature-extraction", modelId, {
+          dtype: "q8",
+          progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.5),
+        }) as Promise<ImageFeatureExtractor>,
+      ),
+    );
+  }
+
+  return imageExtractorCache.get(modelId)!;
 }
 
 async function getTokenizer(modelId: string, onStatus: (status: PipelineStatus) => void) {
@@ -324,6 +345,18 @@ async function extractVectors(
     return extractCausalLmVectors(lm, samples.map((sample) => sample.text), outputMode);
   }
 
+  if (model.task === "image-feature-extraction") {
+    const imageFiles = samples.map((sample) => sample.image).filter((file): file is File => Boolean(file));
+    if (imageFiles.length !== samples.length) {
+      throw new Error("Image embedding requires image files.");
+    }
+
+    const extractor = await getImageExtractor(model.id, onStatus);
+    onStatus({ phase: "embedding", message: `Extracting ${imageFiles.length.toLocaleString()} image embeddings`, progress: 0.62 });
+    const output = await extractor(imageFiles);
+    return normalizeRows(tensorRows(output.tolist()));
+  }
+
   const extractor = await getExtractor(model.id, onStatus);
 
   if (outputMode === "tokens") {
@@ -374,6 +407,16 @@ async function resolveSamples(
   }
 
   if (inputType === "files") {
+    if (model.task === "image-feature-extraction") {
+      return files.map((file) => ({
+        text: imageDescription(file),
+        label: file.name,
+        source: file.name,
+        kind: "image" as const,
+        image: file,
+      }));
+    }
+
     const loaded = await Promise.all(
       files.map(async (file) => ({
         text: trimText(await file.text(), 260),
@@ -506,8 +549,8 @@ function validateCompatibility(model: ModelPreset, inputType: InputType, outputM
     throw new Error(`${model.label} does not expose token embedding layers.`);
   }
 
-  if (model.task === "image-feature-extraction") {
-    throw new Error(`${model.label} is image-capable, but image embedding extraction is not wired into this MVP path yet.`);
+  if (model.task === "image-feature-extraction" && inputType !== "files") {
+    throw new Error(`${model.label} embeds image files. Switch the input type to files before running.`);
   }
 }
 
@@ -643,6 +686,12 @@ function reportProgress(progress: ProgressInfo, onStatus: (status: PipelineStatu
 function trimText(value: string, maxLength: number) {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
+function imageDescription(file: File) {
+  const size =
+    file.size >= 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+  return `${file.type || "image file"} · ${size}`;
 }
 
 export function runColor(index: number) {

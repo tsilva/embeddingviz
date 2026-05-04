@@ -27,6 +27,7 @@ import type {
 } from "./types";
 
 const initialRuns: RunRecord[] = [];
+const NEAREST_NEIGHBOR_LIMIT = 10;
 
 type EmbeddingServices = Pick<typeof import("./lib/embeddings"), "buildEmbeddingInputPlan" | "createEmbeddingRun" | "runColor">;
 
@@ -52,7 +53,6 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   });
   const [runs, setRuns] = useState<RunRecord[]>(initialRuns);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
-  const [neighborLimit, setNeighborLimit] = useState(5);
   const [showNeighborhood, setShowNeighborhood] = useState(false);
   const [query, setQuery] = useState("");
   const [is3d, setIs3d] = useState(false);
@@ -72,21 +72,23 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     () => (selectedPoint ? runs.find((run) => run.points.some((point) => point.id === selectedPoint.id)) ?? null : null),
     [runs, selectedPoint],
   );
-  const nearestByRun = useMemo(
-    () => (selectedPoint ? nearestNeighborsByRun(selectedPoint, runs, neighborLimit) : []),
-    [neighborLimit, runs, selectedPoint],
+  const nearestNeighbors = useMemo(
+    () => (selectedPoint ? nearestNeighborsForPoint(selectedPoint, runs, NEAREST_NEIGHBOR_LIMIT) : []),
+    [runs, selectedPoint],
   );
   const neighborhoodPointIds = useMemo(() => {
     if (!showNeighborhood || !selectedPoint) return null;
-    return new Set([selectedPoint.id, ...nearestByRun.flatMap((group) => group.neighbors.map((neighbor) => neighbor.point.id))]);
-  }, [nearestByRun, selectedPoint, showNeighborhood]);
+    return new Set([selectedPoint.id, ...nearestNeighbors.map((neighbor) => neighbor.point.id)]);
+  }, [nearestNeighbors, selectedPoint, showNeighborhood]);
   const totalVisible = runs.filter((run) => run.visible).reduce((sum, run) => sum + run.count, 0);
   const effectiveInputType = activeOutputMode === "tokens" ? "tokens" : inputType;
+  const isImageModel = model.task === "image-feature-extraction";
   const isWorking = status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting";
   const isPlanning = inputPlanStatus.phase === "loading";
   const candidateInputCount =
     effectiveInputType === "tokens" ? 2 : effectiveInputType === "files" ? files.length : snippets.filter((snippet) => snippet.text.trim()).length;
-  const canRun = !isWorking && !isPlanning && candidateInputCount >= 2;
+  const canRun = !isWorking && !isPlanning && candidateInputCount >= 2 && (!isImageModel || effectiveInputType === "files");
+  const inputPlanItemsById = useMemo(() => new Map(inputPlan?.items.map((item) => [item.id, item]) ?? []), [inputPlan]);
 
   useEffect(() => {
     setInputPlan(null);
@@ -95,8 +97,13 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
       return;
     }
 
+    if (isImageModel) {
+      setInputPlanStatus({ phase: "idle", message: "Vision processor loads on Run", progress: 0 });
+      return;
+    }
+
     setInputPlanStatus({ phase: "idle", message: "Token plan will be prepared on Run", progress: 0 });
-  }, [effectiveInputType, files, model, snippets]);
+  }, [effectiveInputType, files, isImageModel, model, snippets]);
 
   async function handleRun() {
     try {
@@ -111,7 +118,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         ...embeddingServices,
       };
       const preparedInputPlan =
-        effectiveInputType === "tokens"
+        effectiveInputType === "tokens" || isImageModel
           ? null
           : await services.buildEmbeddingInputPlan({
               model,
@@ -179,6 +186,11 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     setSnippets((current) => current.filter((snippet) => snippet.id !== id));
   }
 
+  function removeFile(id: string) {
+    setFiles((current) => current.filter((file) => filePlanItemId(file) !== id));
+    setFileMessage("");
+  }
+
   function toggleRunVisibility(id: string) {
     setRuns((current) => current.map((run) => (run.id === id ? { ...run, visible: !run.visible } : run)));
   }
@@ -187,6 +199,9 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     const next = MODEL_PRESETS.find((preset) => preset.id === nextModelId) ?? MODEL_PRESETS[0];
     setModelId(next.id);
     setOutputMode(next.recommendedOutput);
+    if (next.task === "image-feature-extraction") {
+      setInputType("files");
+    }
     const compatibleFiles = files.filter((file) => isFileCompatibleWithModel(file, next));
     if (compatibleFiles.length !== files.length) {
       setFiles(compatibleFiles);
@@ -196,6 +211,10 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   }
 
   function chooseInputType(nextInputType: InputType) {
+    if (model.task === "image-feature-extraction" && nextInputType !== "files") {
+      return;
+    }
+
     setInputType(nextInputType);
     if (nextInputType === "tokens") {
       setOutputMode(model.outputModes.includes("tokens") ? "tokens" : model.recommendedOutput);
@@ -331,7 +350,12 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                 <span className="fieldLabel">Input type</span>
               </div>
               <div className="segmented">
-                <button className={inputType === "text" ? "active" : ""} type="button" onClick={() => chooseInputType("text")}>
+                <button
+                  className={inputType === "text" ? "active" : ""}
+                  type="button"
+                  onClick={() => chooseInputType("text")}
+                  disabled={isImageModel}
+                >
                   <Type size={15} />
                   Text
                 </button>
@@ -341,23 +365,33 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                 </button>
               </div>
 
+              <TokenPlanOverview
+                inputPlan={inputPlan}
+                status={inputPlanStatus}
+                maxInputTokens={model.maxInputTokens}
+                isImageModel={isImageModel}
+              />
+
               {inputType === "text" ? (
-                <div className="snippetList">
+                <div className="inputStack">
                   <div className="fieldRow">
                     <span className="subLabel">Text snippets</span>
                     <span className="counter">{snippets.length} / 100</span>
                   </div>
                   {snippets.map((snippet) => (
-                    <div className="snippetItem" key={snippet.id}>
-                      <input
-                        value={snippet.text}
-                        onChange={(event) => updateSnippet(snippet.id, event.target.value)}
-                        aria-label="Snippet text"
-                        data-testid="snippet-input"
-                      />
-                      <button type="button" title="Remove snippet" onClick={() => removeSnippet(snippet.id)}>
-                        <X size={15} />
-                      </button>
+                    <div className="inputItemCard" key={snippet.id}>
+                      <div className="snippetItem">
+                        <input
+                          value={snippet.text}
+                          onChange={(event) => updateSnippet(snippet.id, event.target.value)}
+                          aria-label="Snippet text"
+                          data-testid="snippet-input"
+                        />
+                        <button type="button" title="Remove snippet" onClick={() => removeSnippet(snippet.id)}>
+                          <X size={15} />
+                        </button>
+                      </div>
+                      <InputItemMetadata item={inputPlanItemsById.get(snippet.id)} status={inputPlanStatus} />
                     </div>
                   ))}
                   <button className="addButton" type="button" onClick={addSnippet}>
@@ -368,19 +402,41 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
               ) : null}
 
               {inputType === "files" ? (
-                <div className="fileDrop" onDragOver={handleFileDragOver} onDrop={handleFileDrop}>
-                  <input
-                    type="file"
-                    multiple
-                    accept={fileAcceptValue(model)}
-                    onChange={(event) => handleFilesSelected(Array.from(event.target.files ?? []))}
-                  />
-                  <span>{files.length ? selectedFileLabel(files) : `Drop or choose ${acceptedFileLabel(model)}`}</span>
-                  <small>{fileMessage || `Accepts ${acceptedFileLabel(model)} for ${model.label}.`}</small>
+                <div className="inputStack">
+                  <div className="fileDrop" onDragOver={handleFileDragOver} onDrop={handleFileDrop}>
+                    <input
+                      type="file"
+                      multiple
+                      accept={fileAcceptValue(model)}
+                      onChange={(event) => handleFilesSelected(Array.from(event.target.files ?? []))}
+                    />
+                    <span>{files.length ? "Drop or choose replacements" : `Drop or choose ${acceptedFileLabel(model)}`}</span>
+                    <small>{fileMessage || `Accepts ${acceptedFileLabel(model)} for ${model.label}.`}</small>
+                  </div>
+                  {files.length ? (
+                    <div className="fileItemList" aria-label="Selected files">
+                      {files.map((file) => {
+                        const itemId = filePlanItemId(file);
+                        return (
+                          <div className="inputItemCard fileItemCard" key={itemId}>
+                            <div className="fileItem">
+                              <FileText size={16} />
+                              <div>
+                                <strong title={file.name}>{file.name}</strong>
+                                <span>{fileDetailLabel(file)}</span>
+                              </div>
+                              <button type="button" title="Remove file" onClick={() => removeFile(itemId)}>
+                                <X size={15} />
+                              </button>
+                            </div>
+                            <InputItemMetadata item={inputPlanItemsById.get(itemId)} status={inputPlanStatus} isImageModel={isImageModel} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
-
-              <InputPlanSummary inputPlan={inputPlan} status={inputPlanStatus} maxInputTokens={model.maxInputTokens} />
             </section>
           )}
 
@@ -449,7 +505,9 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
             <h2>Selected point</h2>
             {selectedPoint ? (
               <>
-                <span className="metaLabel">{selectedPoint.kind === "token" ? "Subword token" : "Label"}</span>
+                <span className="metaLabel">
+                  {selectedPoint.kind === "token" ? "Subword token" : selectedPoint.kind === "image" ? "Image" : "Label"}
+                </span>
                 <strong data-testid="selected-point-label">{selectedPoint.label}</strong>
                 <p>
                   {selectedPoint.kind === "token"
@@ -476,51 +534,33 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                   <div className="nearestHeader">
                     <div>
                       <h3>Nearest points</h3>
-                      <span>{selectedRun ? `Cosine distance from ${selectedRun.name}` : "Cosine distance"}</span>
+                      <span>{selectedRun ? `Cosine similarity from ${selectedRun.name}` : "Cosine similarity"}</span>
                     </div>
                     <label className="neighborhoodToggle">
                       <input type="checkbox" checked={showNeighborhood} onChange={(event) => setShowNeighborhood(event.target.checked)} />
                       <span>Show neighborhood</span>
                     </label>
                   </div>
-                  <div className="segmented small nearestLimit" aria-label="Nearest neighbor count">
-                    {[3, 5, 10].map((limit) => (
-                      <button
-                        key={limit}
-                        className={neighborLimit === limit ? "active" : ""}
-                        type="button"
-                        onClick={() => setNeighborLimit(limit)}
-                      >
-                        {limit}
-                      </button>
-                    ))}
-                  </div>
                   <div className="nearestGroups">
-                    {nearestByRun.length === 0 ? <p className="muted">No comparable points in visible runs.</p> : null}
-                    {nearestByRun.map((group) => (
-                      <div className="nearestGroup" key={group.run.id}>
-                        <div className="nearestRunHeader">
-                          <span className="swatch" style={{ backgroundColor: group.run.color }} />
-                          <strong>{group.run.name}</strong>
-                          <small>
-                            {group.run.current ? "Current" : "Previous"} · {group.neighbors.length} nearest
+                    {nearestNeighbors.length === 0 ? <p className="muted">No comparable points in visible runs.</p> : null}
+                    {nearestNeighbors.map((neighbor) => (
+                      <button
+                        className="nearestRow"
+                        type="button"
+                        key={neighbor.point.id}
+                        onClick={() => setSelectedPointId(neighbor.point.id)}
+                        data-testid="nearest-row"
+                      >
+                        <span className="nearestRowText">
+                          <strong>{neighbor.point.label}</strong>
+                          <small>{neighbor.point.source}</small>
+                          <small className="nearestRunLine">
+                            <span className="swatch" style={{ backgroundColor: neighbor.run.color }} />
+                            {neighbor.run.name} · {neighbor.run.current ? "Current" : "Previous"}
                           </small>
-                        </div>
-                        {group.neighbors.map((neighbor) => (
-                          <button
-                            className="nearestRow"
-                            type="button"
-                            key={neighbor.point.id}
-                            onClick={() => setSelectedPointId(neighbor.point.id)}
-                          >
-                            <span>
-                              <strong>{neighbor.point.label}</strong>
-                              <small>{neighbor.point.source}</small>
-                            </span>
-                            <code>{neighbor.distance.toFixed(4)}</code>
-                          </button>
-                        ))}
-                      </div>
+                        </span>
+                        <code>{neighbor.similarity.toFixed(4)}</code>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -535,19 +575,36 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   );
 }
 
-function InputPlanSummary({
+function TokenPlanOverview({
   inputPlan,
   status,
   maxInputTokens,
+  isImageModel,
 }: {
   inputPlan: EmbeddingInputPlan | null;
   status: PipelineStatus;
   maxInputTokens: number;
+  isImageModel: boolean;
 }) {
+  if (isImageModel) {
+    return (
+      <div className="tokenPlanCard compact" data-testid="token-plan-overview">
+        <div className="tokenPlanTitle">
+          <span>Input plan</span>
+          <small>Image files embed directly</small>
+        </div>
+        <div className="tokenPlanStats">
+          <span>No text token chunks</span>
+          <span>Vision processor on Run</span>
+        </div>
+      </div>
+    );
+  }
+
   if (status.phase === "loading") {
     return (
-      <div className="inputPlanPanel">
-        <div className="inputPlanHeader">
+      <div className="tokenPlanCard" data-testid="token-plan-overview">
+        <div className="tokenPlanTitle">
           <span>Token plan</span>
           <small>Counting...</small>
         </div>
@@ -560,8 +617,8 @@ function InputPlanSummary({
 
   if (status.phase === "error") {
     return (
-      <div className="inputPlanPanel warning">
-        <div className="inputPlanHeader">
+      <div className="tokenPlanCard warning" data-testid="token-plan-overview">
+        <div className="tokenPlanTitle">
           <span>Token plan</span>
           <small>Error</small>
         </div>
@@ -571,40 +628,86 @@ function InputPlanSummary({
   }
 
   if (!inputPlan) {
-    return null;
+    return (
+      <div className="tokenPlanCard compact" data-testid="token-plan-overview">
+        <div className="tokenPlanTitle">
+          <span>Token plan</span>
+          <small>{status.message}</small>
+        </div>
+        <div className="tokenPlanStats">
+          <span>{maxInputTokens.toLocaleString()} token model max</span>
+          <span>Chunks appear after Run</span>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="inputPlanPanel">
-      <div className="inputPlanHeader">
+    <div className="tokenPlanCard" data-testid="token-plan-overview">
+      <div className="tokenPlanTitle">
         <span>Token plan</span>
         <small>{inputPlan.totalChunks.toLocaleString()} plot points</small>
       </div>
       <div className="inputPlanStats">
         <span>{inputPlan.totalTokens.toLocaleString()} tokens</span>
+        <span>{inputPlan.totalChunks.toLocaleString()} chunks</span>
         <span>{inputPlan.chunkSize.toLocaleString()} usable / {maxInputTokens.toLocaleString()} max</span>
-      </div>
-      <div className="inputPlanRows">
-        {inputPlan.items.length === 0 ? <p className="muted">No inputs selected.</p> : null}
-        {inputPlan.items.map((item) => (
-          <InputPlanRow item={item} key={item.id} />
-        ))}
+        <span>{inputPlan.overlapTokens.toLocaleString()} token overlap</span>
       </div>
     </div>
   );
 }
 
-function InputPlanRow({ item }: { item: InputPlanItem }) {
+function InputItemMetadata({
+  item,
+  status,
+  isImageModel = false,
+}: {
+  item?: InputPlanItem;
+  status: PipelineStatus;
+  isImageModel?: boolean;
+}) {
+  if (isImageModel) {
+    return (
+      <div className="inputItemMeta image" data-testid="input-item-meta">
+        <span>Image embedding</span>
+        <small>not token chunked</small>
+      </div>
+    );
+  }
+
+  if (item) {
+    return (
+      <div className={`inputItemMeta ${item.status}`} data-testid="input-item-meta">
+        <span>{item.tokenCount.toLocaleString()} tokens</span>
+        <span>{item.chunkCount.toLocaleString()} {item.chunkCount === 1 ? "chunk" : "chunks"}</span>
+        <small title={item.message}>{item.message}</small>
+      </div>
+    );
+  }
+
+  if (status.phase === "loading") {
+    return (
+      <div className="inputItemMeta pending" data-testid="input-item-meta">
+        <span>Counting...</span>
+        <small>tokenizing input</small>
+      </div>
+    );
+  }
+
+  if (status.phase === "error") {
+    return (
+      <div className="inputItemMeta skipped" data-testid="input-item-meta">
+        <span>Plan failed</span>
+        <small>{status.message}</small>
+      </div>
+    );
+  }
+
   return (
-    <div className={`inputPlanRow ${item.status}`}>
-      <div>
-        <strong title={item.label}>{item.label}</strong>
-        <span>{item.message}</span>
-      </div>
-      <div>
-        <span>{item.tokenCount.toLocaleString()}</span>
-        <small>{item.chunkCount.toLocaleString()} chunks</small>
-      </div>
+    <div className="inputItemMeta pending" data-testid="input-item-meta">
+      <span>Pending</span>
+      <small>Run to count tokens</small>
     </div>
   );
 }
@@ -619,25 +722,50 @@ function devMockEmbeddingServices(): Partial<EmbeddingServices> {
   }
 
   return {
-    buildEmbeddingInputPlan: async ({ model, inputType, snippets, onStatus }) => {
-      const samples = snippets
-        .filter((snippet) => snippet.text.trim())
-        .map((snippet, index) => {
-          const label = snippet.text.trim();
-          return {
-            id: `mock-snippet-${index}`,
-            text: label,
-            label,
-            parentLabel: label,
-            source: "Text snippets",
-            kind: "input" as const,
-            tokenCount: 3,
-            chunkIndex: 1,
-            chunkCount: 1,
-            tokenStart: 1,
-            tokenEnd: 3,
-          };
-        });
+    buildEmbeddingInputPlan: async ({ model, inputType, snippets, files, onStatus }) => {
+      const rawInputs =
+        inputType === "files"
+          ? await Promise.all(
+              files.map(async (file) => ({
+                id: filePlanItemId(file),
+                label: file.name,
+                text: (await file.text()).trim() || file.name,
+                source: file.name,
+              })),
+            )
+          : snippets.map((snippet, index) => {
+              const label = snippet.text.trim();
+              return {
+                id: snippet.id,
+                label: label || `Snippet ${index + 1}`,
+                text: label,
+                source: "Text snippets",
+              };
+            });
+      const items = rawInputs.map((input) => ({
+        id: input.id,
+        label: input.label,
+        source: input.source,
+        tokenCount: input.text ? 3 : 0,
+        chunkCount: input.text ? 1 : 0,
+        status: input.text ? ("ready" as const) : ("skipped" as const),
+        message: input.text ? "Fits in one model call" : "Skipped empty input",
+      }));
+      const samples = rawInputs
+        .filter((input) => input.text)
+        .map((input, index) => ({
+          id: `mock-input-${index}`,
+          text: input.text,
+          label: input.label,
+          parentLabel: input.label,
+          source: input.source,
+          kind: "input" as const,
+          tokenCount: 3,
+          chunkIndex: 1,
+          chunkCount: 1,
+          tokenStart: 1,
+          tokenEnd: 3,
+        }));
 
       onStatus({ phase: "ready", message: `${samples.length} chunks`, progress: 1 });
       return {
@@ -645,15 +773,15 @@ function devMockEmbeddingServices(): Partial<EmbeddingServices> {
         modelId: model.id,
         chunkSize: model.maxInputTokens,
         overlapTokens: 24,
-        items: [],
+        items,
         samples,
         totalTokens: samples.length * 3,
         totalChunks: samples.length,
-        skippedCount: 0,
+        skippedCount: items.filter((item) => item.status === "skipped").length,
       };
     },
-    createEmbeddingRun: async ({ snippets, reduction, onStatus }) => {
-      const labels = snippets.filter((snippet) => snippet.text.trim()).map((snippet) => snippet.text.trim());
+    createEmbeddingRun: async ({ snippets, inputPlan, reduction, onStatus }) => {
+      const labels = inputPlan?.samples.map((sample) => sample.label) ?? snippets.filter((snippet) => snippet.text.trim()).map((snippet) => snippet.text.trim());
       onStatus({ phase: "embedding", message: "Mock embeddings", progress: 0.6 });
       onStatus({ phase: "projecting", message: `Running ${reduction}`, progress: 0.85 });
       onStatus({ phase: "ready", message: `Mock ${reduction} complete`, progress: 1 });
@@ -685,36 +813,36 @@ function devMockEmbeddingServices(): Partial<EmbeddingServices> {
 }
 
 interface NearestNeighbor {
+  run: RunRecord;
   point: EmbeddingPoint;
   distance: number;
+  similarity: number;
 }
 
-interface NearestNeighborGroup {
-  run: RunRecord;
-  neighbors: NearestNeighbor[];
-}
-
-function nearestNeighborsByRun(selectedPoint: EmbeddingPoint, runs: RunRecord[], limit: number): NearestNeighborGroup[] {
+function nearestNeighborsForPoint(selectedPoint: EmbeddingPoint, runs: RunRecord[], limit: number): NearestNeighbor[] {
   return runs
     .filter((run) => run.visible)
-    .map((run) => ({
-      run,
-      neighbors: run.points
+    .flatMap((run) =>
+      run.points
         .filter((point) => point.id !== selectedPoint.id)
-        .map((point) => ({
-          point,
-          distance: cosineDistance(selectedPoint.vector, point.vector),
-        }))
-        .filter((neighbor) => Number.isFinite(neighbor.distance))
-        .sort((a, b) => a.distance - b.distance)
-        .slice(0, limit),
-    }))
-    .filter((group) => group.neighbors.length > 0);
+        .map((point) => {
+          const similarity = cosineSimilarity(selectedPoint.vector, point.vector);
+          return {
+            run,
+            point,
+            similarity,
+            distance: 1 - similarity,
+          };
+        }),
+    )
+    .filter((neighbor) => Number.isFinite(neighbor.similarity) && Number.isFinite(neighbor.distance))
+    .sort((a, b) => b.similarity - a.similarity || a.distance - b.distance || a.point.label.localeCompare(b.point.label))
+    .slice(0, limit);
 }
 
-function cosineDistance(a: ArrayLike<number>, b: ArrayLike<number>) {
+function cosineSimilarity(a: ArrayLike<number>, b: ArrayLike<number>) {
   const length = Math.min(a.length, b.length);
-  if (length === 0) return Number.POSITIVE_INFINITY;
+  if (length === 0) return Number.NEGATIVE_INFINITY;
 
   let dot = 0;
   let normA = 0;
@@ -727,9 +855,9 @@ function cosineDistance(a: ArrayLike<number>, b: ArrayLike<number>) {
     normB += valueB * valueB;
   }
 
-  if (normA === 0 || normB === 0) return Number.POSITIVE_INFINITY;
+  if (normA === 0 || normB === 0) return Number.NEGATIVE_INFINITY;
   const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
-  return 1 - Math.min(Math.max(similarity, -1), 1);
+  return Math.min(Math.max(similarity, -1), 1);
 }
 
 function runName(inputType: InputType) {
@@ -785,21 +913,19 @@ function acceptedFileLabel(model: typeof MODEL_PRESETS[number]) {
   return model.supportsImages ? "image files" : "text, Markdown, CSV, or JSON files";
 }
 
-function selectedFileLabel(files: File[]) {
-  const counts = files.reduce(
-    (result, file) => {
-      const kind = classifyFile(file);
-      if (kind === "image") result.images += 1;
-      if (kind === "text") result.text += 1;
-      return result;
-    },
-    { images: 0, text: 0 },
-  );
+function filePlanItemId(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
 
-  const parts = [];
-  if (counts.text) parts.push(`${counts.text} text`);
-  if (counts.images) parts.push(`${counts.images} image`);
-  return `${parts.join(" · ")} ${files.length === 1 ? "file" : "files"} selected`;
+function fileDetailLabel(file: File) {
+  const type = file.type || "unknown type";
+  return `${type} · ${formatBytes(file.size)}`;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024).toLocaleString()} KB`;
+  return `${bytes.toLocaleString()} B`;
 }
 
 export default App;
