@@ -17,7 +17,8 @@ export function projectPca(vectors: number[][], dimensions = 3): ProjectionResul
   const dim = vectors[0].length;
   const means = Array.from({ length: dim }, (_, col) => average(vectors.map((row) => row[col] ?? 0)));
   const centered = vectors.map((row) => row.map((value, col) => (value ?? 0) - means[col]));
-  const covariance = buildCovariance(centered, dim);
+  const covarianceRows = sampleRows(centered, 1600);
+  const covariance = buildCovariance(covarianceRows, dim);
   const components: number[][] = [];
   const eigenvalues: number[] = [];
   let working = covariance.map((row) => [...row]);
@@ -41,6 +42,15 @@ export function projectPca(vectors: number[][], dimensions = 3): ProjectionResul
     coordinates: normalizeCoordinates(coordinates),
     explained: [explained[0] ?? 0, explained[1] ?? 0, explained[2] ?? 0],
   };
+}
+
+function sampleRows(rows: number[][], maxRows: number) {
+  if (rows.length <= maxRows) {
+    return rows;
+  }
+
+  const step = rows.length / maxRows;
+  return Array.from({ length: maxRows }, (_, index) => rows[Math.floor(index * step)]);
 }
 
 function buildCovariance(centered: number[][], dim: number) {

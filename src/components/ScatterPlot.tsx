@@ -40,6 +40,8 @@ export function ScatterPlot({
       cy: mapAxis(-point.y, HEIGHT, PADDING) - depthOffset * 0.35,
     };
   });
+  const pointRadius = projected.length > 10000 ? 1.45 : projected.length > 2000 ? 2.1 : 4.5;
+  const labelStride = query ? Math.max(Math.ceil(projected.length / 32), 1) : Math.max(Math.ceil(projected.length / 12), 1);
 
   return (
     <main className="plotRegion" aria-label="Embedding projection">
@@ -125,14 +127,14 @@ export function ScatterPlot({
 
           {projected.map(({ point, cx, cy }, index) => {
             const isSelected = point.id === selected?.id;
-            const showLabel = isSelected || index % Math.max(Math.ceil(projected.length / 9), 1) === 0;
+            const showLabel = isSelected || index % labelStride === 0;
             return (
               <g key={point.id}>
                 <circle
                   className={`point ${isSelected ? "selected" : ""}`}
                   cx={cx}
                   cy={cy}
-                  r={isSelected ? 7 : 4.5}
+                  r={isSelected ? Math.max(pointRadius + 3, 5) : pointRadius}
                   fill={colorForGroup(point.group)}
                   onClick={() => onPointSelect(point)}
                 />
