@@ -43,6 +43,7 @@ test("selecting CLIP keeps text inputs runnable", async ({ page }) => {
 
   await expect(page.getByText("CLIP text encoder · ONNX ready")).toBeVisible();
   await expect(page.getByText("3 items")).toBeVisible();
+  await expect(page.getByTestId("token-plan-overview")).toContainText("Tokenizer runs in worker");
   await expect(page.getByTestId("input-composer")).toBeEditable();
   await expect(page.getByTestId("run-projection")).toBeEnabled();
   await expect(page.getByLabel("Output")).toHaveValue("final");

@@ -83,6 +83,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   }, [nearestNeighbors, selectedPoint, showNeighborhood]);
   const totalVisible = runs.filter((run) => run.visible).reduce((sum, run) => sum + run.count, 0);
   const isImageModel = model.task === "image-feature-extraction";
+  const isClipTextModel = model.task === "clip-text";
   const effectiveInputType: InputType = activeOutputMode === "tokens" ? "tokens" : isImageModel ? "files" : "text";
   const isWorking = status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting";
   const isPlanning = inputPlanStatus.phase === "loading";
@@ -107,8 +108,13 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
       return;
     }
 
+    if (isClipTextModel) {
+      setInputPlanStatus({ phase: "idle", message: "CLIP tokenizer loads in worker on Run", progress: 0 });
+      return;
+    }
+
     setInputPlanStatus({ phase: "idle", message: "Token plan will be prepared on Run", progress: 0 });
-  }, [effectiveInputType, files, isImageModel, model, snippets]);
+  }, [effectiveInputType, files, isClipTextModel, isImageModel, model, snippets]);
 
   async function handleRun() {
     try {
@@ -123,7 +129,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         ...embeddingServices,
       };
       const preparedInputPlan =
-        effectiveInputType === "tokens" || isImageModel
+        effectiveInputType === "tokens" || isImageModel || isClipTextModel
           ? null
           : await services.buildEmbeddingInputPlan({
               model,
@@ -392,6 +398,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                   status={inputPlanStatus}
                   maxInputTokens={model.maxInputTokens}
                   isImageModel={isImageModel}
+                  isClipTextModel={isClipTextModel}
                 />
 
                 <div className="unifiedInputList" aria-label="Added inputs">
@@ -403,7 +410,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                           <div className="unifiedInputText">
                             <strong title={snippet.text}>{trimText(snippet.text, 54)}</strong>
                             <span>Typed text</span>
-                            <InputItemMetadata item={inputPlanItemsById.get(snippet.id)} status={inputPlanStatus} />
+                            <InputItemMetadata item={inputPlanItemsById.get(snippet.id)} status={inputPlanStatus} isClipTextModel={isClipTextModel} />
                           </div>
                           <button type="button" title="Remove input" onClick={() => removeSnippet(snippet.id)} data-testid="remove-input">
                             <X size={15} />
@@ -421,7 +428,12 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                         <div className="unifiedInputText">
                           <strong title={file.name}>{file.name}</strong>
                           <span>{isImageFile ? "Image" : "File"} · {fileDetailLabel(file)}</span>
-                          <InputItemMetadata item={inputPlanItemsById.get(itemId)} status={inputPlanStatus} isImageModel={isImageModel} />
+                          <InputItemMetadata
+                            item={inputPlanItemsById.get(itemId)}
+                            status={inputPlanStatus}
+                            isImageModel={isImageModel}
+                            isClipTextModel={isClipTextModel}
+                          />
                         </div>
                         <button type="button" title="Remove input" onClick={() => removeFile(itemId)} data-testid="remove-input">
                           <X size={15} />
@@ -557,11 +569,13 @@ function TokenPlanOverview({
   status,
   maxInputTokens,
   isImageModel,
+  isClipTextModel,
 }: {
   inputPlan: EmbeddingInputPlan | null;
   status: PipelineStatus;
   maxInputTokens: number;
   isImageModel: boolean;
+  isClipTextModel: boolean;
 }) {
   if (isImageModel) {
     return (
@@ -573,6 +587,21 @@ function TokenPlanOverview({
         <div className="tokenPlanStats">
           <span>No token chunks</span>
           <span>Embeds images directly</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (isClipTextModel) {
+    return (
+      <div className="unifiedTokenPlan" data-testid="token-plan-overview">
+        <div className="tokenPlanTitle">
+          <span>Input plan</span>
+          <small>CLIP text run</small>
+        </div>
+        <div className="tokenPlanStats">
+          <span>{maxInputTokens.toLocaleString()} token model max</span>
+          <span>Tokenizer runs in worker</span>
         </div>
       </div>
     );
@@ -639,16 +668,27 @@ function InputItemMetadata({
   item,
   status,
   isImageModel = false,
+  isClipTextModel = false,
 }: {
   item?: InputPlanItem;
   status: PipelineStatus;
   isImageModel?: boolean;
+  isClipTextModel?: boolean;
 }) {
   if (isImageModel) {
     return (
       <div className="inputItemMeta image" data-testid="input-item-meta">
         <span>Image embedding</span>
         <small>not token chunked</small>
+      </div>
+    );
+  }
+
+  if (isClipTextModel) {
+    return (
+      <div className="inputItemMeta pending" data-testid="input-item-meta">
+        <span>CLIP text</span>
+        <small>tokenized in worker</small>
       </div>
     );
   }

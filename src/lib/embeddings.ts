@@ -100,7 +100,7 @@ export async function createEmbeddingRun({
   validateFiles(model, inputType, files);
 
   const samples =
-    inputType === "tokens" || model.task === "image-feature-extraction"
+    inputType === "tokens" || model.task === "image-feature-extraction" || model.task === "clip-text"
       ? await resolveSamples(inputType, snippets, files, model, onStatus)
       : resolvePlannedSamples(inputPlan);
   if (samples.length < 2) {
@@ -550,14 +550,25 @@ async function resolveSamples(
     return loaded.filter((file) => file.text.length > 0);
   }
 
-  return snippets
+  const loadedFiles = await fileInputs(files);
+  return [
+    ...snippets
     .filter((snippet) => snippet.text.trim().length > 0)
     .map((snippet) => ({
       text: snippet.text.trim(),
       label: snippet.text.trim(),
       source: "Typed text",
-      kind: "input",
-    }));
+      kind: "input" as const,
+    })),
+    ...loadedFiles
+      .filter((file) => file.text.length > 0)
+      .map((file) => ({
+        text: trimText(file.text, 260),
+        label: file.label,
+        source: file.source,
+        kind: "input" as const,
+      })),
+  ];
 }
 
 function snippetInputs(snippets: TextSnippet[]) {
