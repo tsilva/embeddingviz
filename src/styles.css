@@ -107,10 +107,10 @@ button {
 
 .topbarStatus {
   display: grid;
-  grid-template-columns: minmax(170px, 1.4fr) minmax(132px, 0.7fr) minmax(128px, 0.7fr);
+  grid-template-columns: minmax(170px, 1.4fr) minmax(132px, 0.7fr);
   align-items: center;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 420px;
   height: 38px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -160,6 +160,23 @@ button {
 
 .topbarStatusSegment.primary.error svg {
   color: var(--rose);
+}
+
+.topbarReduction {
+  flex: 0 0 234px;
+  height: 38px;
+}
+
+.topbarReduction button {
+  height: 100%;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@media (max-width: 1460px) {
+  .runtimeChip {
+    display: none;
+  }
 }
 
 .runButton {
@@ -370,6 +387,165 @@ button {
   width: 112px;
 }
 
+.inputWidgetSection {
+  padding-bottom: 22px;
+}
+
+.inputWidgetHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.inputWidgetHeader .fieldLabel {
+  margin-bottom: 0;
+}
+
+.inputWidget {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.inputWidget textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: #111827;
+  outline: none;
+  padding: 12px 13px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.inputWidget textarea::placeholder {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.inputWidget textarea:focus,
+.inputWidget textarea:focus-visible {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.inputWidget textarea[readonly] {
+  background: var(--panel-soft);
+}
+
+.inputMessage {
+  margin: -2px 0 0;
+  color: var(--rose);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.unifiedTokenPlan {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-soft);
+  padding: 10px 11px;
+}
+
+.unifiedTokenPlan.warning {
+  border-color: rgba(244, 63, 114, 0.38);
+  background: #fff7f9;
+}
+
+.unifiedTokenPlan p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.unifiedInputList {
+  display: grid;
+  gap: 8px;
+}
+
+.emptyInputList {
+  margin: 0;
+  border: 1px dashed var(--border-strong);
+  border-radius: 7px;
+  background: var(--panel-soft);
+  padding: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.unifiedInputRow {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 32px;
+  gap: 9px;
+  align-items: start;
+  border: 1px solid #edf2f7;
+  border-radius: 7px;
+  background: var(--panel-soft);
+  padding: 10px 9px;
+}
+
+.unifiedInputRow > svg {
+  margin-top: 3px;
+  color: var(--blue);
+}
+
+.unifiedInputRow button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+}
+
+.unifiedInputText {
+  min-width: 0;
+}
+
+.unifiedInputText strong,
+.unifiedInputText > span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unifiedInputText strong {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.unifiedInputText > span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.unifiedInputText .inputItemMeta {
+  margin-top: 7px;
+}
+
 .inputStack {
   margin-top: 18px;
 }
@@ -533,6 +709,7 @@ button {
 
 .tokenPlanTitle,
 .inputPlanStats,
+.tokenPlanStats,
 .inputItemMeta {
   display: flex;
   align-items: center;
@@ -548,6 +725,7 @@ button {
 
 .tokenPlanTitle small,
 .inputPlanStats,
+.tokenPlanStats,
 .inputItemMeta span,
 .inputItemMeta small {
   color: var(--muted);
@@ -1132,16 +1310,17 @@ button {
     grid-template-columns: 310px minmax(520px, 1fr) 300px;
   }
 
-  .runtimeChip {
-    display: none;
-  }
-
   .topbarStatus {
-    grid-template-columns: minmax(170px, 1.35fr) minmax(132px, 0.8fr) minmax(128px, 0.7fr);
+    flex-basis: 360px;
+    grid-template-columns: minmax(170px, 1.35fr) minmax(132px, 0.8fr);
   }
 
   .topbarStatusSegment {
     padding: 0 14px;
+  }
+
+  .topbarReduction {
+    flex-basis: 220px;
   }
 
   .plotToolbar {

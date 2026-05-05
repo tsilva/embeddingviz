@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Database,
   FileText,
+  Image as ImageIcon,
   Loader2,
   Play,
   Plus,
@@ -40,9 +41,9 @@ declare global {
 function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServices> } = {}) {
   const [modelId, setModelId] = useState(MODEL_PRESETS[0].id);
   const [outputMode, setOutputMode] = useState<OutputMode>("final");
-  const [inputType, setInputType] = useState<InputType>("text");
   const [reduction, setReduction] = useState<ReductionMethod>("PCA");
   const [snippets, setSnippets] = useState<TextSnippet[]>(SAMPLE_SNIPPETS.slice(0, 3));
+  const [composerText, setComposerText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [fileMessage, setFileMessage] = useState("");
   const [inputPlan, setInputPlan] = useState<EmbeddingInputPlan | null>(null);
@@ -81,12 +82,16 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     return new Set([selectedPoint.id, ...nearestNeighbors.map((neighbor) => neighbor.point.id)]);
   }, [nearestNeighbors, selectedPoint, showNeighborhood]);
   const totalVisible = runs.filter((run) => run.visible).reduce((sum, run) => sum + run.count, 0);
-  const effectiveInputType = activeOutputMode === "tokens" ? "tokens" : inputType;
   const isImageModel = model.task === "image-feature-extraction";
+  const effectiveInputType: InputType = activeOutputMode === "tokens" ? "tokens" : isImageModel ? "files" : "text";
   const isWorking = status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting";
   const isPlanning = inputPlanStatus.phase === "loading";
   const candidateInputCount =
-    effectiveInputType === "tokens" ? 2 : effectiveInputType === "files" ? files.length : snippets.filter((snippet) => snippet.text.trim()).length;
+    effectiveInputType === "tokens"
+      ? 2
+      : isImageModel
+        ? files.length
+        : snippets.filter((snippet) => snippet.text.trim()).length + files.length;
   const canRun = !isWorking && !isPlanning && candidateInputCount >= 2 && (!isImageModel || effectiveInputType === "files");
   const inputPlanItemsById = useMemo(() => new Map(inputPlan?.items.map((item) => [item.id, item]) ?? []), [inputPlan]);
 
@@ -168,18 +173,18 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     }
   }
 
-  function updateSnippet(id: string, value: string) {
-    setSnippets((current) => current.map((snippet) => (snippet.id === id ? { ...snippet, text: value } : snippet)));
-  }
+  function addComposerText() {
+    const text = composerText.trim();
+    if (!text || isImageModel) return;
 
-  function addSnippet() {
     setSnippets((current) => [
       ...current,
       {
         id: crypto.randomUUID(),
-        text: "",
+        text,
       },
     ]);
+    setComposerText("");
   }
 
   function removeSnippet(id: string) {
@@ -200,26 +205,13 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     setModelId(next.id);
     setOutputMode(next.recommendedOutput);
     if (next.task === "image-feature-extraction") {
-      setInputType("files");
+      setComposerText("");
     }
     const compatibleFiles = files.filter((file) => isFileCompatibleWithModel(file, next));
     if (compatibleFiles.length !== files.length) {
       setFiles(compatibleFiles);
       const rejected = files.length - compatibleFiles.length;
       setFileMessage(`${rejected} selected ${rejected === 1 ? "file is" : "files are"} incompatible with ${next.label}.`);
-    }
-  }
-
-  function chooseInputType(nextInputType: InputType) {
-    if (model.task === "image-feature-extraction" && nextInputType !== "files") {
-      return;
-    }
-
-    setInputType(nextInputType);
-    if (nextInputType === "tokens") {
-      setOutputMode(model.outputModes.includes("tokens") ? "tokens" : model.recommendedOutput);
-    } else if (activeOutputMode === "tokens") {
-      setOutputMode(model.recommendedOutput === "tokens" ? "final" : model.recommendedOutput);
     }
   }
 
@@ -233,21 +225,27 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     const compatibleFiles = nextFiles.filter((file) => isFileCompatibleWithModel(file, model));
     const rejectedCount = nextFiles.length - compatibleFiles.length;
 
-    setFiles(compatibleFiles);
+    setFiles((current) => {
+      const existingIds = new Set(current.map(filePlanItemId));
+      const additions = compatibleFiles.filter((file) => !existingIds.has(filePlanItemId(file)));
+      return [...current, ...additions];
+    });
     if (rejectedCount > 0) {
-      setFileMessage(`${rejectedCount} ${rejectedCount === 1 ? "file was" : "files were"} not added because ${model.label} cannot embed that MIME type.`);
+      setFileMessage(`${rejectedCount} ${rejectedCount === 1 ? "file was" : "files were"} not added because ${model.label} cannot embed that type.`);
     } else {
       setFileMessage("");
     }
   }
 
-  function handleFileDragOver(event: DragEvent<HTMLDivElement>) {
-    const canDrop = Array.from(event.dataTransfer.items).some((item) => item.kind === "file" && isMimeCompatibleWithModel(item.type, model));
+  function handleInputDragOver(event: DragEvent<HTMLElement>) {
+    const canDrop = Array.from(event.dataTransfer.items).some(
+      (item) => item.kind === "file" && (!item.type || isMimeCompatibleWithModel(item.type, model)),
+    );
     event.preventDefault();
     event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
   }
 
-  function handleFileDrop(event: DragEvent<HTMLDivElement>) {
+  function handleInputDrop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     handleFilesSelected(Array.from(event.dataTransfer.files));
   }
@@ -278,9 +276,22 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
             <span>{status.message}</span>
           </div>
           <div className="topbarStatusSegment">{totalVisible.toLocaleString()} visible points</div>
-          <div className="topbarStatusSegment">{runs[0]?.reduction ?? reduction} projected</div>
         </div>
 
+        <div className="topbarReduction segmented" aria-label="Reduction method">
+          {(["PCA", "UMAP", "t-SNE"] as ReductionMethod[]).map((method) => (
+            <button
+              key={method}
+              className={reduction === method ? "active" : ""}
+              type="button"
+              onClick={() => setReduction(method)}
+              title={`Project with ${method}`}
+              data-testid={`reduction-${method}`}
+            >
+              {method}
+            </button>
+          ))}
+        </div>
         <button className="runButton" type="button" onClick={handleRun} disabled={!canRun} data-testid="run-projection">
           {isWorking ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
           Run
@@ -345,118 +356,82 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
               <p className="notice tokenModeNotice">Plots the tokenizer vocabulary with a WebGL point layer.</p>
             </section>
           ) : (
-            <section className="controlSection">
-              <div className="fieldRow">
-                <span className="fieldLabel">Input type</span>
-              </div>
-              <div className="segmented">
-                <button
-                  className={inputType === "text" ? "active" : ""}
-                  type="button"
-                  onClick={() => chooseInputType("text")}
-                  disabled={isImageModel}
-                >
-                  <Type size={15} />
-                  Text
-                </button>
-                <button className={inputType === "files" ? "active" : ""} type="button" onClick={() => chooseInputType("files")}>
-                  <FileText size={15} />
-                  Files
-                </button>
+            <section className="controlSection inputWidgetSection">
+              <div className="inputWidgetHeader">
+                <span className="fieldLabel">Inputs</span>
+                <span className="counter">{candidateInputCount.toLocaleString()} items</span>
               </div>
 
-              <TokenPlanOverview
-                inputPlan={inputPlan}
-                status={inputPlanStatus}
-                maxInputTokens={model.maxInputTokens}
-                isImageModel={isImageModel}
-              />
+              <div className="inputWidget">
+                <textarea
+                  value={composerText}
+                  onChange={(event) => setComposerText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.altKey) {
+                      event.preventDefault();
+                      addComposerText();
+                    }
+                  }}
+                  onDragOver={handleInputDragOver}
+                  onDrop={handleInputDrop}
+                  placeholder={
+                    isImageModel
+                      ? "Drag image files here. This model embeds images only."
+                      : "Type text or drag files/images here. Enter adds, Alt+Enter newline."
+                  }
+                  readOnly={isImageModel}
+                  aria-label="Input text or dropped files"
+                  data-testid="input-composer"
+                />
+                {fileMessage ? <p className="inputMessage">{fileMessage}</p> : null}
 
-              {inputType === "text" ? (
-                <div className="inputStack">
-                  <div className="fieldRow">
-                    <span className="subLabel">Text snippets</span>
-                    <span className="counter">{snippets.length} / 100</span>
-                  </div>
-                  {snippets.map((snippet) => (
-                    <div className="inputItemCard" key={snippet.id}>
-                      <div className="snippetItem">
-                        <input
-                          value={snippet.text}
-                          onChange={(event) => updateSnippet(snippet.id, event.target.value)}
-                          aria-label="Snippet text"
-                          data-testid="snippet-input"
-                        />
-                        <button type="button" title="Remove snippet" onClick={() => removeSnippet(snippet.id)}>
+                <TokenPlanOverview
+                  inputPlan={inputPlan}
+                  status={inputPlanStatus}
+                  maxInputTokens={model.maxInputTokens}
+                  isImageModel={isImageModel}
+                />
+
+                <div className="unifiedInputList" aria-label="Added inputs">
+                  {!candidateInputCount ? <p className="emptyInputList">Type text, or drag files into the box above.</p> : null}
+                  {!isImageModel
+                    ? snippets.map((snippet) => (
+                        <div className="unifiedInputRow" key={snippet.id} data-testid="input-row">
+                          <Type size={16} />
+                          <div className="unifiedInputText">
+                            <strong title={snippet.text}>{trimText(snippet.text, 54)}</strong>
+                            <span>Typed text</span>
+                            <InputItemMetadata item={inputPlanItemsById.get(snippet.id)} status={inputPlanStatus} />
+                          </div>
+                          <button type="button" title="Remove input" onClick={() => removeSnippet(snippet.id)} data-testid="remove-input">
+                            <X size={15} />
+                          </button>
+                        </div>
+                      ))
+                    : null}
+                  {files.map((file) => {
+                    const itemId = filePlanItemId(file);
+                    const isImageFile = classifyFile(file) === "image";
+                    const FileIcon = isImageFile ? ImageIcon : FileText;
+                    return (
+                      <div className="unifiedInputRow" key={itemId} data-testid="input-row">
+                        <FileIcon size={16} />
+                        <div className="unifiedInputText">
+                          <strong title={file.name}>{file.name}</strong>
+                          <span>{isImageFile ? "Image" : "File"} · {fileDetailLabel(file)}</span>
+                          <InputItemMetadata item={inputPlanItemsById.get(itemId)} status={inputPlanStatus} isImageModel={isImageModel} />
+                        </div>
+                        <button type="button" title="Remove input" onClick={() => removeFile(itemId)} data-testid="remove-input">
                           <X size={15} />
                         </button>
                       </div>
-                      <InputItemMetadata item={inputPlanItemsById.get(snippet.id)} status={inputPlanStatus} />
-                    </div>
-                  ))}
-                  <button className="addButton" type="button" onClick={addSnippet}>
-                    <Plus size={16} />
-                    Add snippet
-                  </button>
+                    );
+                  })}
                 </div>
-              ) : null}
-
-              {inputType === "files" ? (
-                <div className="inputStack">
-                  <div className="fileDrop" onDragOver={handleFileDragOver} onDrop={handleFileDrop}>
-                    <input
-                      type="file"
-                      multiple
-                      accept={fileAcceptValue(model)}
-                      onChange={(event) => handleFilesSelected(Array.from(event.target.files ?? []))}
-                    />
-                    <span>{files.length ? "Drop or choose replacements" : `Drop or choose ${acceptedFileLabel(model)}`}</span>
-                    <small>{fileMessage || `Accepts ${acceptedFileLabel(model)} for ${model.label}.`}</small>
-                  </div>
-                  {files.length ? (
-                    <div className="fileItemList" aria-label="Selected files">
-                      {files.map((file) => {
-                        const itemId = filePlanItemId(file);
-                        return (
-                          <div className="inputItemCard fileItemCard" key={itemId}>
-                            <div className="fileItem">
-                              <FileText size={16} />
-                              <div>
-                                <strong title={file.name}>{file.name}</strong>
-                                <span>{fileDetailLabel(file)}</span>
-                              </div>
-                              <button type="button" title="Remove file" onClick={() => removeFile(itemId)}>
-                                <X size={15} />
-                              </button>
-                            </div>
-                            <InputItemMetadata item={inputPlanItemsById.get(itemId)} status={inputPlanStatus} isImageModel={isImageModel} />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+              </div>
             </section>
           )}
 
-          <section className="controlSection">
-            <span className="fieldLabel">Reduction</span>
-            <div className="segmented">
-              {(["PCA", "UMAP", "t-SNE"] as ReductionMethod[]).map((method) => (
-                <button
-                  key={method}
-                  className={reduction === method ? "active" : ""}
-                  type="button"
-                  onClick={() => setReduction(method)}
-                  title={`Project with ${method}`}
-                  data-testid={`reduction-${method}`}
-                >
-                  {method}
-                </button>
-              ))}
-            </div>
-          </section>
         </aside>
 
         <ScatterPlot
@@ -588,14 +563,14 @@ function TokenPlanOverview({
 }) {
   if (isImageModel) {
     return (
-      <div className="tokenPlanCard compact" data-testid="token-plan-overview">
+      <div className="unifiedTokenPlan" data-testid="token-plan-overview">
         <div className="tokenPlanTitle">
           <span>Input plan</span>
-          <small>Image files embed directly</small>
+          <small>Vision run</small>
         </div>
         <div className="tokenPlanStats">
-          <span>No text token chunks</span>
-          <span>Vision processor on Run</span>
+          <span>No token chunks</span>
+          <span>Embeds images directly</span>
         </div>
       </div>
     );
@@ -603,7 +578,7 @@ function TokenPlanOverview({
 
   if (status.phase === "loading") {
     return (
-      <div className="tokenPlanCard" data-testid="token-plan-overview">
+      <div className="unifiedTokenPlan" data-testid="token-plan-overview">
         <div className="tokenPlanTitle">
           <span>Token plan</span>
           <small>Counting...</small>
@@ -617,7 +592,7 @@ function TokenPlanOverview({
 
   if (status.phase === "error") {
     return (
-      <div className="tokenPlanCard warning" data-testid="token-plan-overview">
+      <div className="unifiedTokenPlan warning" data-testid="token-plan-overview">
         <div className="tokenPlanTitle">
           <span>Token plan</span>
           <small>Error</small>
@@ -629,10 +604,10 @@ function TokenPlanOverview({
 
   if (!inputPlan) {
     return (
-      <div className="tokenPlanCard compact" data-testid="token-plan-overview">
+      <div className="unifiedTokenPlan" data-testid="token-plan-overview">
         <div className="tokenPlanTitle">
           <span>Token plan</span>
-          <small>{status.message}</small>
+          <small>Pending run</small>
         </div>
         <div className="tokenPlanStats">
           <span>{maxInputTokens.toLocaleString()} token model max</span>
@@ -643,7 +618,7 @@ function TokenPlanOverview({
   }
 
   return (
-    <div className="tokenPlanCard" data-testid="token-plan-overview">
+    <div className="unifiedTokenPlan" data-testid="token-plan-overview">
       <div className="tokenPlanTitle">
         <span>Token plan</span>
         <small>{inputPlan.totalChunks.toLocaleString()} plot points</small>
@@ -723,25 +698,24 @@ function devMockEmbeddingServices(): Partial<EmbeddingServices> {
 
   return {
     buildEmbeddingInputPlan: async ({ model, inputType, snippets, files, onStatus }) => {
-      const rawInputs =
-        inputType === "files"
-          ? await Promise.all(
-              files.map(async (file) => ({
-                id: filePlanItemId(file),
-                label: file.name,
-                text: (await file.text()).trim() || file.name,
-                source: file.name,
-              })),
-            )
-          : snippets.map((snippet, index) => {
-              const label = snippet.text.trim();
-              return {
-                id: snippet.id,
-                label: label || `Snippet ${index + 1}`,
-                text: label,
-                source: "Text snippets",
-              };
-            });
+      const fileInputs = await Promise.all(
+        files.map(async (file) => ({
+          id: filePlanItemId(file),
+          label: file.name,
+          text: (await file.text()).trim() || file.name,
+          source: file.name,
+        })),
+      );
+      const textInputs = snippets.map((snippet, index) => {
+        const label = snippet.text.trim();
+        return {
+          id: snippet.id,
+          label: label || `Snippet ${index + 1}`,
+          text: label,
+          source: "Typed text",
+        };
+      });
+      const rawInputs = inputType === "files" ? fileInputs : [...textInputs, ...fileInputs];
       const items = rawInputs.map((input) => ({
         id: input.id,
         label: input.label,
@@ -793,7 +767,7 @@ function devMockEmbeddingServices(): Partial<EmbeddingServices> {
           label,
           parentLabel: label,
           snippet: label,
-          source: "Text snippets",
+          source: "Typed text",
           output: "Final embedding",
           vector: [index + 1, index === 1 ? 1 : 0, index === 2 ? 1 : 0],
           x: [-5, 0, 5][index] ?? 0,
@@ -862,8 +836,8 @@ function cosineSimilarity(a: ArrayLike<number>, b: ArrayLike<number>) {
 
 function runName(inputType: InputType) {
   if (inputType === "tokens") return "Token table";
-  if (inputType === "files") return "Files";
-  return "Text snippets";
+  if (inputType === "files") return "Image inputs";
+  return "Inputs";
 }
 
 function outputLabel(outputMode: OutputMode, task?: typeof MODEL_PRESETS[number]["task"]) {
@@ -905,14 +879,6 @@ function isFileCompatibleWithModel(file: File, model: typeof MODEL_PRESETS[numbe
   return false;
 }
 
-function fileAcceptValue(model: typeof MODEL_PRESETS[number]) {
-  return model.supportsImages ? "image/*" : ".txt,.md,.csv,.json,.jsonl,.ndjson,text/*,application/json,application/csv";
-}
-
-function acceptedFileLabel(model: typeof MODEL_PRESETS[number]) {
-  return model.supportsImages ? "image files" : "text, Markdown, CSV, or JSON files";
-}
-
 function filePlanItemId(file: File) {
   return `${file.name}-${file.size}-${file.lastModified}`;
 }
@@ -920,6 +886,11 @@ function filePlanItemId(file: File) {
 function fileDetailLabel(file: File) {
   const type = file.type || "unknown type";
   return `${type} · ${formatBytes(file.size)}`;
+}
+
+function trimText(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
 }
 
 function formatBytes(bytes: number) {

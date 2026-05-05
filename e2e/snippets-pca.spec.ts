@@ -1,13 +1,21 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function replaceInputs(page: Page, inputs: string[]) {
+  while ((await page.getByTestId("remove-input").count()) > 0) {
+    await page.getByTestId("remove-input").first().click();
+  }
+
+  const composer = page.getByTestId("input-composer");
+  for (const input of inputs) {
+    await composer.fill(input);
+    await composer.press("Enter");
+  }
+}
 
 test("enter snippets, run PCA, select a point", async ({ page }) => {
   await page.goto("/?mockEmbeddings=1");
 
-  const snippets = page.getByTestId("snippet-input");
-  await expect(snippets).toHaveCount(3);
-  await snippets.nth(0).fill("alpha forest");
-  await snippets.nth(1).fill("beta weather");
-  await snippets.nth(2).fill("gamma cliffs");
+  await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
 
   await page.getByTestId("reduction-PCA").click();
   await page.getByTestId("run-projection").click();
@@ -31,10 +39,7 @@ test("enter snippets, run PCA, select a point", async ({ page }) => {
 test("input widget shows token plan totals and per-snippet metadata", async ({ page }) => {
   await page.goto("/?mockEmbeddings=1");
 
-  const snippets = page.getByTestId("snippet-input");
-  await snippets.nth(0).fill("alpha forest");
-  await snippets.nth(1).fill("beta weather");
-  await snippets.nth(2).fill("gamma cliffs");
+  await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
 
   await expect(page.getByTestId("token-plan-overview")).toContainText("Chunks appear after Run");
   await page.getByTestId("run-projection").click();
@@ -54,11 +59,7 @@ test("selected tooltip label truncates long point labels", async ({ page }) => {
 
   await page.goto("/?mockEmbeddings=1");
 
-  const snippets = page.getByTestId("snippet-input");
-  await expect(snippets).toHaveCount(3);
-  await snippets.nth(0).fill(longLabel);
-  await snippets.nth(1).fill("beta weather");
-  await snippets.nth(2).fill("gamma cliffs");
+  await replaceInputs(page, [longLabel, "beta weather", "gamma cliffs"]);
 
   await page.getByTestId("reduction-PCA").click();
   await page.getByTestId("run-projection").click();
@@ -140,10 +141,7 @@ test("nearest point results are ordered by similarity across visible runs", asyn
 
   await page.goto("/?mockEmbeddings=1");
 
-  const snippets = page.getByTestId("snippet-input");
-  await snippets.nth(0).fill("alpha forest");
-  await snippets.nth(1).fill("beta weather");
-  await snippets.nth(2).fill("gamma cliffs");
+  await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
 
   await page.getByTestId("run-projection").click();
   await expect(page.getByText("3 visible points")).toBeVisible();
@@ -160,10 +158,7 @@ test("nearest point results are ordered by similarity across visible runs", asyn
 test("wheel zoom only captures scrolling while the left mouse button is down", async ({ page }) => {
   await page.goto("/?mockEmbeddings=1");
 
-  const snippets = page.getByTestId("snippet-input");
-  await snippets.nth(0).fill("alpha forest");
-  await snippets.nth(1).fill("beta weather");
-  await snippets.nth(2).fill("gamma cliffs");
+  await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
   await page.getByTestId("run-projection").click();
   await expect(page.getByText("3 visible points")).toBeVisible();
 

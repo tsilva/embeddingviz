@@ -233,7 +233,7 @@ export async function buildEmbeddingInputPlan({
   onStatus({ phase: "loading", message: "Counting tokens", progress: 0.04 });
   const tokenizer = await getTokenizer(model.id, onStatus);
   const chunkSize = effectiveChunkSize(tokenizer, model);
-  const rawInputs = inputType === "files" ? await fileInputs(files) : snippetInputs(snippets);
+  const rawInputs = inputType === "files" ? await fileInputs(files) : [...snippetInputs(snippets), ...(await fileInputs(files))];
   const items: InputPlanItem[] = [];
   const samples: PlannedEmbeddingSample[] = [];
 
@@ -433,7 +433,7 @@ async function resolveSamples(
     .map((snippet) => ({
       text: snippet.text.trim(),
       label: snippet.text.trim(),
-      source: "Text snippets",
+      source: "Typed text",
       kind: "input",
     }));
 }
@@ -445,7 +445,7 @@ function snippetInputs(snippets: TextSnippet[]) {
       id: snippet.id,
       text,
       label: text ? trimText(text, 42) : `Snippet ${index + 1}`,
-      source: "Text snippets",
+      source: "Typed text",
     };
   });
 }
