@@ -36,6 +36,60 @@ test("enter snippets, run PCA, select a point", async ({ page }) => {
   await expect(page.getByTestId("selected-point-label")).toHaveText("gamma cliffs");
 });
 
+test("selected marker stays aligned with the canvas point in a stretched plot", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1100 });
+  await page.goto("/?mockEmbeddings=1");
+
+  await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
+
+  await page.getByTestId("reduction-PCA").click();
+  await page.getByTestId("run-projection").click();
+  await expect(page.getByTestId("selected-point-label")).toHaveText("alpha forest");
+
+  const canvasBox = await page.getByTestId("point-cloud-canvas").boundingBox();
+  const markerBox = await page.getByTestId("selected-point-marker").boundingBox();
+  expect(canvasBox).not.toBeNull();
+  expect(markerBox).not.toBeNull();
+
+  const expectedX = canvasBox!.x + (canvasBox!.width * 120) / 860;
+  const expectedY = canvasBox!.y + (canvasBox!.height * 320) / 640;
+  const markerCenterX = markerBox!.x + markerBox!.width / 2;
+  const markerCenterY = markerBox!.y + markerBox!.height / 2;
+
+  expect(Math.abs(markerCenterX - expectedX)).toBeLessThan(2);
+  expect(Math.abs(markerCenterY - expectedY)).toBeLessThan(2);
+});
+
+test("axis tick labels update after zooming the projection", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
+
+  await page.getByTestId("run-projection").click();
+  await expect(page.getByText("3 visible points")).toBeVisible();
+
+  await expect(page.getByTestId("x-axis-tick")).toHaveText(["-6", "-4", "-2", "0", "2", "4", "6"]);
+
+  await page.getByTitle("Zoom in").click();
+
+  await expect(page.getByTestId("x-axis-tick")).toHaveText(["-4", "-2", "0", "2", "4"]);
+});
+
+test("selected marker is only shown when the selected point is rendered", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
+
+  await page.getByTestId("run-projection").click();
+  await expect(page.getByTestId("selected-point-label")).toHaveText("alpha forest");
+  await expect(page.getByTestId("selected-point-marker")).toHaveCount(1);
+
+  await page.getByLabel("Search points").fill("beta");
+
+  await expect(page.getByTestId("selected-point-label")).toHaveText("alpha forest");
+  await expect(page.getByTestId("selected-point-marker")).toHaveCount(0);
+});
+
 test("input widget shows token plan totals and per-snippet metadata", async ({ page }) => {
   await page.goto("/?mockEmbeddings=1");
 

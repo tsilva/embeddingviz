@@ -29,10 +29,14 @@ type CausalLmBundle = {
   tokenizer: Tokenizer;
   model: CausalLmModel;
 };
+type EmbeddingWorkerMessage =
+  | { id: string; type: "status"; status: PipelineStatus }
+  | { id: string; type: "result"; rows: number; dimensions: number; buffer: ArrayBuffer }
+  | { id: string; type: "error"; message: string };
 const MAX_TOKEN_POINTS = 50000;
 const CHUNK_OVERLAP_TOKENS = 24;
 
-interface ResolvedSample {
+export interface ResolvedSample {
   text: string;
   label: string;
   parentLabel?: string;
@@ -326,6 +330,75 @@ function resolvePlannedSamples(inputPlan?: EmbeddingInputPlan | null): ResolvedS
 }
 
 async function extractVectors(
+  model: ModelPreset,
+  samples: ResolvedSample[],
+  inputType: InputType,
+  outputMode: OutputMode,
+  onStatus: (status: PipelineStatus) => void,
+) {
+  if (typeof Worker === "undefined" || inputType === "tokens") {
+    return extractVectorsCore(model, samples, inputType, outputMode, onStatus);
+  }
+
+  try {
+    return await extractVectorsInWorker(model, samples, inputType, outputMode, onStatus);
+  } catch (error) {
+    console.warn("Embedding worker failed, falling back to main thread extraction.", error);
+    if (model.task === "image-feature-extraction") {
+      throw error;
+    }
+    return extractVectorsCore(model, samples, inputType, outputMode, onStatus);
+  }
+}
+
+async function extractVectorsInWorker(
+  model: ModelPreset,
+  samples: ResolvedSample[],
+  inputType: InputType,
+  outputMode: OutputMode,
+  onStatus: (status: PipelineStatus) => void,
+) {
+  const id = crypto.randomUUID();
+  const worker = await createEmbeddingWorker();
+
+  return new Promise<Float32Array[]>((resolve, reject) => {
+    worker.onmessage = (event: MessageEvent<EmbeddingWorkerMessage>) => {
+      const message = event.data;
+      if (message.id !== id) return;
+
+      if (message.type === "status") {
+        onStatus(message.status);
+        return;
+      }
+
+      worker.terminate();
+      if (message.type === "error") {
+        reject(new Error(message.message));
+        return;
+      }
+
+      resolve(unpackVectors(new Float32Array(message.buffer), message.rows, message.dimensions));
+    };
+
+    worker.onerror = (event) => {
+      worker.terminate();
+      reject(new Error(event.message || "Embedding worker failed"));
+    };
+
+    worker.postMessage({ id, model, samples, inputType, outputMode });
+  });
+}
+
+async function createEmbeddingWorker() {
+  const { default: EmbeddingWorker } = await import("./embeddings.worker?worker");
+  return new EmbeddingWorker();
+}
+
+function unpackVectors(data: Float32Array, rows: number, dimensions: number) {
+  return Array.from({ length: rows }, (_, index) => data.subarray(index * dimensions, (index + 1) * dimensions));
+}
+
+export async function extractVectorsCore(
   model: ModelPreset,
   samples: ResolvedSample[],
   inputType: InputType,

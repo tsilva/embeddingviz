@@ -162,6 +162,14 @@ button {
   color: var(--rose);
 }
 
+.topbarActions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 12px;
+  margin-left: auto;
+}
+
 .topbarReduction {
   flex: 0 0 234px;
   height: 38px;
@@ -1321,6 +1329,10 @@ button {
 
   .topbarReduction {
     flex-basis: 220px;
+  }
+
+  .topbarActions {
+    gap: 10px;
   }
 
   .plotToolbar {

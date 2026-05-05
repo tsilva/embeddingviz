@@ -35,6 +35,7 @@ interface ViewState {
 const WIDTH = 860;
 const HEIGHT = 640;
 const PADDING = 58;
+const AXIS_LIMIT = 6;
 const CENTER_X = WIDTH / 2;
 const CENTER_Y = HEIGHT / 2;
 const LABEL_LIMIT = 2000;
@@ -78,8 +79,8 @@ export function ScatterPlot({
     () =>
       filtered.map(({ point, color }) => {
         const depthOffset = is3d ? point.z * 9 : 0;
-        const baseX = mapAxis(point.x, WIDTH, PADDING) + depthOffset;
-        const baseY = mapAxis(-point.y, HEIGHT, PADDING) - depthOffset * 0.35;
+        const baseX = mapX(point.x) + depthOffset;
+        const baseY = mapY(point.y) - depthOffset * 0.35;
         const transformed = applyView(baseX, baseY, view);
         return {
           point,
@@ -93,23 +94,13 @@ export function ScatterPlot({
 
   const selectedProjected = useMemo(() => {
     if (!selected) return null;
-    const depthOffset = is3d ? selected.point.z * 9 : 0;
-    const transformed = applyView(
-      mapAxis(selected.point.x, WIDTH, PADDING) + depthOffset,
-      mapAxis(-selected.point.y, HEIGHT, PADDING) - depthOffset * 0.35,
-      view,
-    );
-    return {
-      point: selected.point,
-      color: selected.color,
-      cx: transformed.x,
-      cy: transformed.y,
-    };
-  }, [selected, is3d, view]);
+    return projected.find(({ point }) => point.id === selected.point.id) ?? null;
+  }, [projected, selected]);
 
   const labelStride = query ? Math.max(Math.ceil(projected.length / 32), 1) : Math.max(Math.ceil(projected.length / 12), 1);
   const showAmbientLabels = projected.length <= LABEL_LIMIT;
   const axisPrefix = primaryReduction === "PCA" ? "PC" : primaryReduction;
+  const axisTicks = useMemo(() => buildAxisTicks(view), [view]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -235,30 +226,36 @@ export function ScatterPlot({
           onMouseLeave={handleCanvasMouseUp}
           onClick={handleCanvasClick}
         />
-        <svg className="plotOverlay" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={`2D ${primaryReduction} scatter plot`}>
+        <svg
+          className="plotOverlay"
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={`2D ${primaryReduction} scatter plot`}
+        >
           <defs>
             <filter id="tooltipShadow" x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="12" stdDeviation="10" floodOpacity="0.14" />
             </filter>
           </defs>
 
-          {Array.from({ length: 7 }, (_, index) => {
-            const x = PADDING + index * ((WIDTH - PADDING * 2) / 6);
-            const y = PADDING + index * ((HEIGHT - PADDING * 2) / 6);
-            const label = -6 + index * 2;
-            return (
-              <g key={index}>
-                <line className="gridLine" x1={x} x2={x} y1={PADDING} y2={HEIGHT - PADDING} />
-                <line className="gridLine" x1={PADDING} x2={WIDTH - PADDING} y1={y} y2={y} />
-                <text className="axisTick" x={x} y={HEIGHT - 24} textAnchor="middle">
-                  {label}
-                </text>
-                <text className="axisTick" x={28} y={HEIGHT - y + 4} textAnchor="middle">
-                  {label}
-                </text>
-              </g>
-            );
-          })}
+          {axisTicks.x.map(({ value, position }) => (
+            <g key={`x-${value}`}>
+              <line className="gridLine" x1={position} x2={position} y1={PADDING} y2={HEIGHT - PADDING} />
+              <text className="axisTick" x={position} y={HEIGHT - 24} textAnchor="middle" data-testid="x-axis-tick">
+                {formatTick(value)}
+              </text>
+            </g>
+          ))}
+
+          {axisTicks.y.map(({ value, position }) => (
+            <g key={`y-${value}`}>
+              <line className="gridLine" x1={PADDING} x2={WIDTH - PADDING} y1={position} y2={position} />
+              <text className="axisTick" x={28} y={position + 4} textAnchor="middle" data-testid="y-axis-tick">
+                {formatTick(value)}
+              </text>
+            </g>
+          ))}
 
           <line className="axisLine" x1={PADDING} x2={WIDTH - PADDING} y1={HEIGHT - PADDING} y2={HEIGHT - PADDING} />
           <line className="axisLine" x1={PADDING} x2={PADDING} y1={PADDING} y2={HEIGHT - PADDING} />
@@ -297,7 +294,7 @@ function SelectedPointOverlay({ selected, axisPrefix }: { selected: ProjectedPoi
   const { point, color, cx, cy } = selected;
   return (
     <>
-      <circle className="selectedPointRing" cx={cx} cy={cy} r="8" fill={color} />
+      <circle className="selectedPointRing" cx={cx} cy={cy} r="8" fill={color} data-testid="selected-point-marker" />
       <g transform={`translate(${Math.min(cx + 34, WIDTH - 246)} ${Math.max(cy - 20, 74)})`}>
         <rect className="tooltipPanel" width="218" height="104" rx="8" filter="url(#tooltipShadow)" />
         <circle cx="20" cy="24" r="6" fill={color} />
@@ -505,6 +502,13 @@ function applyView(x: number, y: number, view: ViewState) {
   };
 }
 
+function invertView(x: number, y: number, view: ViewState) {
+  return {
+    x: CENTER_X + (x - CENTER_X - view.offsetX) / view.scale,
+    y: CENTER_Y + (y - CENTER_Y - view.offsetY) / view.scale,
+  };
+}
+
 function zoomAt(view: ViewState, factor: number, anchorX: number, anchorY: number) {
   const nextScale = clamp(view.scale * factor, MIN_ZOOM, MAX_ZOOM);
   const scaleRatio = nextScale / view.scale;
@@ -519,7 +523,62 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function mapAxis(value: number, size: number, padding: number) {
-  const range = size - padding * 2;
-  return padding + ((value + 6) / 12) * range;
+function mapX(value: number) {
+  return PADDING + ((value + AXIS_LIMIT) / (AXIS_LIMIT * 2)) * (WIDTH - PADDING * 2);
+}
+
+function mapY(value: number) {
+  return PADDING + ((AXIS_LIMIT - value) / (AXIS_LIMIT * 2)) * (HEIGHT - PADDING * 2);
+}
+
+function unmapX(position: number) {
+  return ((position - PADDING) / (WIDTH - PADDING * 2)) * (AXIS_LIMIT * 2) - AXIS_LIMIT;
+}
+
+function unmapY(position: number) {
+  return AXIS_LIMIT - ((position - PADDING) / (HEIGHT - PADDING * 2)) * (AXIS_LIMIT * 2);
+}
+
+function buildAxisTicks(view: ViewState) {
+  const left = unmapX(invertView(PADDING, CENTER_Y, view).x);
+  const right = unmapX(invertView(WIDTH - PADDING, CENTER_Y, view).x);
+  const bottom = unmapY(invertView(CENTER_X, HEIGHT - PADDING, view).y);
+  const top = unmapY(invertView(CENTER_X, PADDING, view).y);
+
+  return {
+    x: visibleTicks(left, right).map((value) => ({ value, position: applyView(mapX(value), CENTER_Y, view).x })),
+    y: visibleTicks(bottom, top).map((value) => ({ value, position: applyView(CENTER_X, mapY(value), view).y })),
+  };
+}
+
+function visibleTicks(start: number, end: number) {
+  const min = Math.min(start, end);
+  const max = Math.max(start, end);
+  const step = niceTickStep((max - min) / 6);
+  const first = Math.ceil(min / step) * step;
+  const ticks: number[] = [];
+
+  for (let value = first; value <= max + step * 0.5; value += step) {
+    ticks.push(roundTick(value));
+  }
+
+  return ticks;
+}
+
+function niceTickStep(rawStep: number) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
+  const exponent = Math.floor(Math.log10(rawStep));
+  const magnitude = 10 ** exponent;
+  const normalized = rawStep / magnitude;
+  const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return nice * magnitude;
+}
+
+function roundTick(value: number) {
+  return Math.abs(value) < 1e-9 ? 0 : Number(value.toPrecision(12));
+}
+
+function formatTick(value: number) {
+  if (Number.isInteger(value)) return String(value);
+  return value.toFixed(Math.abs(value) >= 1 ? 1 : 2).replace(/\.?0+$/, "");
 }

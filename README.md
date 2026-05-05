@@ -31,9 +31,9 @@ npm run preview  # preview the production build locally
 
 - Models are loaded in the browser through `@huggingface/transformers`; remote Hugging Face model files are allowed and browser cache is enabled.
 - There is no backend service or persistent app storage. Run history, selected points, and visibility toggles live in React state.
-- Projection uses a Web Worker when available, with a main-thread fallback.
+- Model embedding extraction and projection use Web Workers when available, with a main-thread fallback for non-image extraction.
 - Token mode can project up to 50,000 tokenizer vocabulary entries.
-- The image input control is present, but image embedding extraction is not wired into the current MVP path.
+- Image embedding runs accept dropped image files for the CLIP vision preset.
 
 ## Architecture
 

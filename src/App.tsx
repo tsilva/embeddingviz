@@ -278,24 +278,26 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
           <div className="topbarStatusSegment">{totalVisible.toLocaleString()} visible points</div>
         </div>
 
-        <div className="topbarReduction segmented" aria-label="Reduction method">
-          {(["PCA", "UMAP", "t-SNE"] as ReductionMethod[]).map((method) => (
-            <button
-              key={method}
-              className={reduction === method ? "active" : ""}
-              type="button"
-              onClick={() => setReduction(method)}
-              title={`Project with ${method}`}
-              data-testid={`reduction-${method}`}
-            >
-              {method}
-            </button>
-          ))}
+        <div className="topbarActions">
+          <div className="topbarReduction segmented" aria-label="Reduction method">
+            {(["PCA", "UMAP", "t-SNE"] as ReductionMethod[]).map((method) => (
+              <button
+                key={method}
+                className={reduction === method ? "active" : ""}
+                type="button"
+                onClick={() => setReduction(method)}
+                title={`Project with ${method}`}
+                data-testid={`reduction-${method}`}
+              >
+                {method}
+              </button>
+            ))}
+          </div>
+          <button className="runButton" type="button" onClick={handleRun} disabled={!canRun} data-testid="run-projection">
+            {isWorking ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
+            Run
+          </button>
         </div>
-        <button className="runButton" type="button" onClick={handleRun} disabled={!canRun} data-testid="run-projection">
-          {isWorking ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
-          Run
-        </button>
         <div
           className={`progressTrack ${isWorking ? "active" : ""}`}
           role="progressbar"
