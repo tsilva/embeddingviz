@@ -38,12 +38,12 @@ export const MODEL_PRESETS: ModelPreset[] = [
     id: "Xenova/clip-vit-base-patch32",
     label: "CLIP ViT-B/32",
     task: "clip-text",
-    summary: "CLIP text encoder · ONNX ready",
+    summary: "CLIP text/image encoders · ONNX ready",
     recommendedOutput: "final",
     outputModes: ["final"],
     maxInputTokens: 77,
-    supportsImages: false,
-    note: "CLIP text tower for comparing short text prompts in the shared CLIP embedding space.",
+    supportsImages: true,
+    note: "CLIP text and image towers for comparing prompts and images in the shared CLIP embedding space.",
   },
 ];
 

@@ -109,7 +109,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     }
 
     if (isClipTextModel) {
-      setInputPlanStatus({ phase: "idle", message: "CLIP tokenizer loads in worker on Run", progress: 0 });
+      setInputPlanStatus({ phase: "idle", message: "CLIP encoders load in worker on Run", progress: 0 });
       return;
     }
 
@@ -597,11 +597,11 @@ function TokenPlanOverview({
       <div className="unifiedTokenPlan" data-testid="token-plan-overview">
         <div className="tokenPlanTitle">
           <span>Input plan</span>
-          <small>CLIP text run</small>
+          <small>CLIP multimodal run</small>
         </div>
         <div className="tokenPlanStats">
           <span>{maxInputTokens.toLocaleString()} token model max</span>
-          <span>Tokenizer runs in worker</span>
+          <span>Text/image encoders route by type</span>
         </div>
       </div>
     );
@@ -687,8 +687,8 @@ function InputItemMetadata({
   if (isClipTextModel) {
     return (
       <div className="inputItemMeta pending" data-testid="input-item-meta">
-        <span>CLIP text</span>
-        <small>tokenized in worker</small>
+        <span>CLIP routed</span>
+        <small>by input type</small>
       </div>
     );
   }
@@ -883,7 +883,7 @@ function runName(inputType: InputType) {
 }
 
 function outputLabel(outputMode: OutputMode, task?: typeof MODEL_PRESETS[number]["task"]) {
-  if (task === "clip-text") return "CLIP text embedding";
+  if (task === "clip-text") return "CLIP embedding";
   if (task === "text-generation") {
     if (outputMode === "final") return "Final LM value state";
     if (outputMode === "tokens") return "Tokenizer subword features";

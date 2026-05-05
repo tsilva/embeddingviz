@@ -12,11 +12,52 @@ vi.mock("@huggingface/transformers", () => ({
       [0, 0, 1],
     ],
   })),
+  AutoProcessor: {
+    from_pretrained: vi.fn(async () => async (images: unknown[] | unknown) => ({
+      __images: Array.isArray(images) ? images : [images],
+    })),
+  },
   AutoTokenizer: {
-    from_pretrained: vi.fn(),
+    from_pretrained: vi.fn(async () => {
+      const tokenizer = ((texts: string[]) => ({ __texts: texts })) as {
+        (texts: string[]): { __texts: string[] };
+        encode: (text: string) => number[];
+        decode: (ids: number[]) => string;
+        get_vocab: () => Map<string, number>;
+      };
+      tokenizer.encode = (text: string) => text.split(/\s+/).filter(Boolean).map((_, index) => index + 1);
+      tokenizer.decode = (ids: number[]) => ids.map((id) => `token-${id}`).join(" ");
+      tokenizer.get_vocab = () => new Map();
+      return tokenizer;
+    }),
   },
   AutoModelForCausalLM: {
     from_pretrained: vi.fn(),
+  },
+  CLIPTextModelWithProjection: {
+    from_pretrained: vi.fn(async () => async (inputs: { __texts: string[] }) => {
+      const rows = inputs.__texts.map((_, index) => (index === 0 ? [1, 0, 0] : [0, 0, 1]));
+      return {
+        text_embeds: {
+          dims: [rows.length, 3],
+          data: rows.flat(),
+        },
+      };
+    }),
+  },
+  CLIPVisionModelWithProjection: {
+    from_pretrained: vi.fn(async () => async (inputs: { __images: unknown[] }) => {
+      const rows = inputs.__images.map(() => [0, 1, 0]);
+      return {
+        image_embeds: {
+          dims: [rows.length, 3],
+          data: rows.flat(),
+        },
+      };
+    }),
+  },
+  RawImage: {
+    fromBlob: vi.fn(async (blob: Blob) => blob),
   },
 }));
 
@@ -40,6 +81,18 @@ const textModel: ModelPreset = {
   outputModes: ["final"],
   maxInputTokens: 128,
   supportsImages: false,
+  note: "Test fixture",
+};
+
+const clipModel: ModelPreset = {
+  id: "test/clip-model",
+  label: "CLIP Model",
+  task: "clip-text",
+  summary: "CLIP test model",
+  recommendedOutput: "final",
+  outputModes: ["final"],
+  maxInputTokens: 77,
+  supportsImages: true,
   note: "Test fixture",
 };
 
@@ -137,5 +190,31 @@ describe("embedding internals", () => {
       ["gamma", 5, -5],
     ]);
     expect(statuses).toContain("ready");
+  });
+
+  it("routes CLIP text and image inputs to their matching encoders while preserving order", async () => {
+    const imageFile = new File(["png"], "plot.png", { type: "image/png" });
+    const textFile = new File(["delta notes"], "notes.md", { type: "text/markdown" });
+
+    await createEmbeddingRun({
+      model: clipModel,
+      outputMode: "final",
+      inputType: "text",
+      reduction: "PCA",
+      snippets: [{ id: "s1", text: "alpha prompt" }],
+      files: [imageFile, textFile],
+      inputPlan: null,
+      onStatus: () => {},
+    });
+
+    expect(projectReduction).toHaveBeenLastCalledWith(
+      [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      "PCA",
+      expect.any(Function),
+    );
   });
 });

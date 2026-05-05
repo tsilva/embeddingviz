@@ -34,6 +34,13 @@ type ClipTextBundle = {
   tokenizer: Tokenizer;
   model: ClipTextModel;
 };
+type ImageProcessor = (images: unknown[] | unknown) => Promise<Record<string, unknown>>;
+type ClipVisionModel = (inputs: Record<string, unknown>) => Promise<Record<string, { data: ArrayLike<number>; dims: number[] } | unknown>>;
+type ClipVisionBundle = {
+  processor: ImageProcessor;
+  model: ClipVisionModel;
+  RawImage: { fromBlob(blob: Blob): Promise<unknown> };
+};
 type EmbeddingWorkerMessage =
   | { id: string; type: "status"; status: PipelineStatus }
   | { id: string; type: "result"; rows: number; dimensions: number; buffer: ArrayBuffer }
@@ -61,6 +68,7 @@ const extractorCache = new Map<string, Promise<FeatureExtractor>>();
 const imageExtractorCache = new Map<string, Promise<ImageFeatureExtractor>>();
 const causalLmCache = new Map<string, Promise<CausalLmBundle>>();
 const clipTextCache = new Map<string, Promise<ClipTextBundle>>();
+const clipVisionCache = new Map<string, Promise<ClipVisionBundle>>();
 const tokenizerCache = new Map<string, Promise<Tokenizer>>();
 let transformersPromise: Promise<TransformersModule> | null = null;
 
@@ -243,6 +251,27 @@ async function getClipTextModel(modelId: string, onStatus: (status: PipelineStat
   }
 
   return clipTextCache.get(modelId)!;
+}
+
+async function getClipVisionModel(modelId: string, onStatus: (status: PipelineStatus) => void) {
+  if (!clipVisionCache.has(modelId)) {
+    clipVisionCache.set(
+      modelId,
+      loadTransformers().then(({ AutoProcessor, CLIPVisionModelWithProjection, RawImage }) =>
+        Promise.all([
+          AutoProcessor.from_pretrained(modelId, {
+            progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.28),
+          }) as Promise<ImageProcessor>,
+          CLIPVisionModelWithProjection.from_pretrained(modelId, {
+            dtype: "q8",
+            progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.52),
+          }) as Promise<ClipVisionModel>,
+        ]).then(([processor, model]) => ({ processor, model, RawImage })),
+      ),
+    );
+  }
+
+  return clipVisionCache.get(modelId)!;
 }
 
 export async function buildEmbeddingInputPlan({
@@ -446,9 +475,7 @@ export async function extractVectorsCore(
   }
 
   if (model.task === "clip-text") {
-    const clip = await getClipTextModel(model.id, onStatus);
-    onStatus({ phase: "embedding", message: "Computing CLIP text embeddings", progress: 0.62 });
-    return extractClipTextVectors(clip, samples.map((sample) => sample.text));
+    return extractClipVectors(model.id, samples, onStatus);
   }
 
   if (model.task === "image-feature-extraction") {
@@ -508,6 +535,59 @@ async function extractClipTextVectors(bundle: ClipTextBundle, texts: string[]) {
   return normalizeRows(tensorDataRows(textEmbeds));
 }
 
+async function extractClipImageVectors(bundle: ClipVisionBundle, files: File[]) {
+  const images = await Promise.all(files.map((file) => bundle.RawImage.fromBlob(file)));
+  const inputs = await bundle.processor(images);
+  const outputs = await bundle.model(inputs);
+  const imageEmbeds = outputs.image_embeds;
+
+  if (!isTensorLike(imageEmbeds) || imageEmbeds.dims.length !== 2) {
+    throw new Error("CLIP did not return image embeddings.");
+  }
+
+  return normalizeRows(tensorDataRows(imageEmbeds));
+}
+
+async function extractClipVectors(modelId: string, samples: ResolvedSample[], onStatus: (status: PipelineStatus) => void) {
+  const vectors: Array<number[] | undefined> = Array.from({ length: samples.length });
+  const textSamples = samples
+    .map((sample, index) => ({ sample, index }))
+    .filter(({ sample }) => sample.kind !== "image");
+  const imageSamples = samples
+    .map((sample, index) => ({ sample, index }))
+    .filter(({ sample }) => sample.kind === "image" && sample.image);
+
+  if (textSamples.length > 0) {
+    const clip = await getClipTextModel(modelId, onStatus);
+    onStatus({ phase: "embedding", message: "Computing CLIP text embeddings", progress: imageSamples.length ? 0.58 : 0.62 });
+    const textVectors = await extractClipTextVectors(
+      clip,
+      textSamples.map(({ sample }) => sample.text),
+    );
+    textSamples.forEach(({ index }, vectorIndex) => {
+      vectors[index] = textVectors[vectorIndex];
+    });
+  }
+
+  if (imageSamples.length > 0) {
+    const clip = await getClipVisionModel(modelId, onStatus);
+    onStatus({ phase: "embedding", message: "Computing CLIP image embeddings", progress: textSamples.length ? 0.68 : 0.62 });
+    const imageVectors = await extractClipImageVectors(
+      clip,
+      imageSamples.map(({ sample }) => sample.image!),
+    );
+    imageSamples.forEach(({ index }, vectorIndex) => {
+      vectors[index] = imageVectors[vectorIndex];
+    });
+  }
+
+  if (vectors.some((vector) => !vector)) {
+    throw new Error("CLIP did not return embeddings for every input.");
+  }
+
+  return vectors as number[][];
+}
+
 async function resolveSamples(
   inputType: InputType,
   snippets: TextSnippet[],
@@ -539,35 +619,20 @@ async function resolveSamples(
       }));
     }
 
-    const loaded = await Promise.all(
-      files.map(async (file) => ({
-        text: trimText(await file.text(), 260),
-        label: file.name,
-        source: file.name,
-        kind: "input" as const,
-      })),
-    );
-    return loaded.filter((file) => file.text.length > 0);
+    return fileSamples(files, model);
   }
 
-  const loadedFiles = await fileInputs(files);
+  const loadedFiles = await fileSamples(files, model);
   return [
     ...snippets
-    .filter((snippet) => snippet.text.trim().length > 0)
-    .map((snippet) => ({
-      text: snippet.text.trim(),
-      label: snippet.text.trim(),
-      source: "Typed text",
-      kind: "input" as const,
-    })),
-    ...loadedFiles
-      .filter((file) => file.text.length > 0)
-      .map((file) => ({
-        text: trimText(file.text, 260),
-        label: file.label,
-        source: file.source,
+      .filter((snippet) => snippet.text.trim().length > 0)
+      .map((snippet) => ({
+        text: snippet.text.trim(),
+        label: snippet.text.trim(),
+        source: "Typed text",
         kind: "input" as const,
       })),
+    ...loadedFiles,
   ];
 }
 
@@ -592,6 +657,38 @@ async function fileInputs(files: File[]) {
       source: file.name,
     })),
   );
+}
+
+async function fileSamples(files: File[], model: ModelPreset): Promise<ResolvedSample[]> {
+  const samples = await Promise.all(
+    files.map(async (file): Promise<ResolvedSample | null> => {
+      const kind = classifyFile(file);
+      if (kind === "image" && model.supportsImages) {
+        return {
+          text: imageDescription(file),
+          label: file.name,
+          source: file.name,
+          kind: "image",
+          image: file,
+        };
+      }
+
+      if (kind === "text" && model.task !== "image-feature-extraction") {
+        const text = trimText(await file.text(), 260);
+        if (!text) return null;
+        return {
+          text,
+          label: file.name,
+          source: file.name,
+          kind: "input",
+        };
+      }
+
+      return null;
+    }),
+  );
+
+  return samples.filter((sample): sample is ResolvedSample => Boolean(sample));
 }
 
 function normalizeText(value: string) {
@@ -705,7 +802,7 @@ function validateFiles(model: ModelPreset, inputType: InputType, files: File[]) 
 }
 
 function outputLabel(outputMode: OutputMode, task?: ModelPreset["task"]) {
-  if (task === "clip-text") return "CLIP text embedding";
+  if (task === "clip-text") return "CLIP embedding";
   if (task === "text-generation") {
     if (outputMode === "final") return "Final LM value state";
     if (outputMode === "tokens") return "Tokenizer subword features";
