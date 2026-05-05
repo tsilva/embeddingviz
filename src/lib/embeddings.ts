@@ -29,6 +29,11 @@ type CausalLmBundle = {
   tokenizer: Tokenizer;
   model: CausalLmModel;
 };
+type ClipTextModel = (inputs: ReturnType<Tokenizer>) => Promise<Record<string, { data: ArrayLike<number>; dims: number[] } | unknown>>;
+type ClipTextBundle = {
+  tokenizer: Tokenizer;
+  model: ClipTextModel;
+};
 type EmbeddingWorkerMessage =
   | { id: string; type: "status"; status: PipelineStatus }
   | { id: string; type: "result"; rows: number; dimensions: number; buffer: ArrayBuffer }
@@ -55,6 +60,7 @@ export interface ResolvedSample {
 const extractorCache = new Map<string, Promise<FeatureExtractor>>();
 const imageExtractorCache = new Map<string, Promise<ImageFeatureExtractor>>();
 const causalLmCache = new Map<string, Promise<CausalLmBundle>>();
+const clipTextCache = new Map<string, Promise<ClipTextBundle>>();
 const tokenizerCache = new Map<string, Promise<Tokenizer>>();
 let transformersPromise: Promise<TransformersModule> | null = null;
 
@@ -216,6 +222,27 @@ async function getCausalLm(modelId: string, onStatus: (status: PipelineStatus) =
   }
 
   return causalLmCache.get(modelId)!;
+}
+
+async function getClipTextModel(modelId: string, onStatus: (status: PipelineStatus) => void) {
+  if (!clipTextCache.has(modelId)) {
+    clipTextCache.set(
+      modelId,
+      loadTransformers().then(({ AutoTokenizer, CLIPTextModelWithProjection }) =>
+        Promise.all([
+          AutoTokenizer.from_pretrained(modelId, {
+            progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.28),
+          }) as Promise<Tokenizer>,
+          CLIPTextModelWithProjection.from_pretrained(modelId, {
+            dtype: "q8",
+            progress_callback: (progress: ProgressInfo) => reportProgress(progress, onStatus, 0.52),
+          }) as Promise<ClipTextModel>,
+        ]).then(([tokenizer, model]) => ({ tokenizer, model })),
+      ),
+    );
+  }
+
+  return clipTextCache.get(modelId)!;
 }
 
 export async function buildEmbeddingInputPlan({
@@ -418,6 +445,12 @@ export async function extractVectorsCore(
     return extractCausalLmVectors(lm, samples.map((sample) => sample.text), outputMode);
   }
 
+  if (model.task === "clip-text") {
+    const clip = await getClipTextModel(model.id, onStatus);
+    onStatus({ phase: "embedding", message: "Computing CLIP text embeddings", progress: 0.62 });
+    return extractClipTextVectors(clip, samples.map((sample) => sample.text));
+  }
+
   if (model.task === "image-feature-extraction") {
     const imageFiles = samples.map((sample) => sample.image).filter((file): file is File => Boolean(file));
     if (imageFiles.length !== samples.length) {
@@ -457,6 +490,22 @@ async function extractCausalLmVectors(bundle: CausalLmBundle, texts: string[], o
   }
 
   return normalizeRows(poolValueStates(valueState, inputs.attention_mask));
+}
+
+async function extractClipTextVectors(bundle: ClipTextBundle, texts: string[]) {
+  const inputs = bundle.tokenizer(texts, {
+    padding: true,
+    truncation: true,
+    max_length: 77,
+  });
+  const outputs = await bundle.model(inputs);
+  const textEmbeds = outputs.text_embeds;
+
+  if (!isTensorLike(textEmbeds) || textEmbeds.dims.length !== 2) {
+    throw new Error("CLIP did not return text embeddings.");
+  }
+
+  return normalizeRows(tensorDataRows(textEmbeds));
 }
 
 async function resolveSamples(
@@ -602,6 +651,14 @@ function tensorRows(value: unknown): number[][] {
   });
 }
 
+function tensorDataRows(tensor: { data: ArrayLike<number>; dims: number[] }) {
+  const [rows, dimensions] = tensor.dims;
+  return Array.from({ length: rows }, (_, rowIndex) => {
+    const offset = rowIndex * dimensions;
+    return Array.from({ length: dimensions }, (_, col) => Number(tensor.data[offset + col] ?? 0));
+  });
+}
+
 function meanPool(rows: number[][]) {
   const dim = rows[0]?.length ?? 0;
   const pooled = Array.from({ length: dim }, () => 0);
@@ -637,6 +694,7 @@ function validateFiles(model: ModelPreset, inputType: InputType, files: File[]) 
 }
 
 function outputLabel(outputMode: OutputMode, task?: ModelPreset["task"]) {
+  if (task === "clip-text") return "CLIP text embedding";
   if (task === "text-generation") {
     if (outputMode === "final") return "Final LM value state";
     if (outputMode === "tokens") return "Tokenizer subword features";

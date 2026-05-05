@@ -33,7 +33,7 @@ npm run preview  # preview the production build locally
 - There is no backend service or persistent app storage. Run history, selected points, and visibility toggles live in React state.
 - Model embedding extraction and projection use Web Workers when available, with a main-thread fallback for non-image extraction.
 - Token mode can project up to 50,000 tokenizer vocabulary entries.
-- Image embedding runs accept dropped image files for the CLIP vision preset.
+- The CLIP preset uses the CLIP text encoder for the standard snippet workflow.
 
 ## Architecture
 

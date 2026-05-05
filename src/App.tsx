@@ -843,6 +843,7 @@ function runName(inputType: InputType) {
 }
 
 function outputLabel(outputMode: OutputMode, task?: typeof MODEL_PRESETS[number]["task"]) {
+  if (task === "clip-text") return "CLIP text embedding";
   if (task === "text-generation") {
     if (outputMode === "final") return "Final LM value state";
     if (outputMode === "tokens") return "Tokenizer subword features";

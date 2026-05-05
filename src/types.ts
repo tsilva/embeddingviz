@@ -44,7 +44,7 @@ export interface RunRecord {
 export interface ModelPreset {
   id: string;
   label: string;
-  task: "feature-extraction" | "text-generation" | "image-feature-extraction";
+  task: "feature-extraction" | "text-generation" | "image-feature-extraction" | "clip-text";
   summary: string;
   recommendedOutput: OutputMode;
   outputModes: OutputMode[];

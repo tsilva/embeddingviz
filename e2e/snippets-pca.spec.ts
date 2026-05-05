@@ -36,6 +36,18 @@ test("enter snippets, run PCA, select a point", async ({ page }) => {
   await expect(page.getByTestId("selected-point-label")).toHaveText("gamma cliffs");
 });
 
+test("selecting CLIP keeps text inputs runnable", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  await page.getByLabel("Model").selectOption("Xenova/clip-vit-base-patch32");
+
+  await expect(page.getByText("CLIP text encoder · ONNX ready")).toBeVisible();
+  await expect(page.getByText("3 items")).toBeVisible();
+  await expect(page.getByTestId("input-composer")).toBeEditable();
+  await expect(page.getByTestId("run-projection")).toBeEnabled();
+  await expect(page.getByLabel("Output")).toHaveValue("final");
+});
+
 test("selected marker stays aligned with the canvas point in a stretched plot", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1100 });
   await page.goto("/?mockEmbeddings=1");
