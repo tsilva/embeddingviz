@@ -1,268 +1,270 @@
 import type { PipelineStatus, ReductionMethod } from "../types";
-import { normalizeCoordinates, projectPca, type ProjectionResult, type VectorRow } from "./pca";
+import { normalizeCoordinates, projectPca, projectPcaMatrix, vectorsToMatrix, type ProjectionResult, type VectorRow } from "./pca";
 
 type StatusReporter = (status: PipelineStatus) => void;
 
-interface Neighbor {
-  index: number;
-  distance: number;
-}
-
-const EPSILON = 1e-6;
+const TSNE_TARGET_DIMENSIONS = 50;
+const TSNE_EARLY_EXAGGERATION_ITERATIONS = 250;
+const TSNE_EARLY_EXAGGERATION = 12;
+const TSNE_EPSILON = 1e-12;
 
 export async function projectReductionCore(vectors: VectorRow[], method: ReductionMethod, onStatus: StatusReporter): Promise<ProjectionResult> {
   onStatus({ phase: "projecting", message: `Projecting with ${method}`, progress: 0.82 });
   await yieldToBrowser();
 
-  const seed = projectPca(vectors, 3);
-  if (method === "PCA" || vectors.length < 3) {
-    return seed;
+  if (method === "PCA" || vectors.length < 4) {
+    return await projectPca(vectors, 3);
   }
 
-  onStatus({ phase: "projecting", message: `Building ${method} neighborhood graph`, progress: 0.86 });
+  const matrix = vectorsToMatrix(vectors);
+  if (method === "UMAP") {
+    return projectUmap(matrix, onStatus);
+  }
+
+  return projectTsne(matrix, onStatus);
+}
+
+async function projectUmap(vectors: number[][], onStatus: StatusReporter): Promise<ProjectionResult> {
+  onStatus({ phase: "projecting", message: "Building UMAP neighborhood graph", progress: 0.84 });
   await yieldToBrowser();
 
-  const neighbors = buildApproximateNeighbors(seed.coordinates, method === "UMAP" ? 10 : 14);
-  const layout = method === "UMAP" ? await runUmapLayout(seed.coordinates, neighbors, onStatus) : await runTsneLayout(seed.coordinates, neighbors, onStatus);
+  const { UMAP } = await import("umap-js");
+  const umap = new UMAP({
+    distanceFn: cosineDistance,
+    minDist: 0.1,
+    nComponents: 3,
+    nEpochs: umapEpochs(vectors.length),
+    nNeighbors: Math.max(2, Math.min(15, vectors.length - 1)),
+    random: seededRandom(42),
+  });
+
+  const embedding = await umap.fitAsync(vectors, (epoch) => {
+    if (epoch % 10 === 0) {
+      onStatus({ phase: "projecting", message: "Optimizing UMAP layout", progress: Math.min(0.97, 0.86 + epoch / umapEpochs(vectors.length) * 0.11) });
+    }
+  });
 
   return {
-    coordinates: normalizeCoordinates(layout),
+    coordinates: normalizeCoordinates(embedding.map(toCoordinate)),
     explained: [0, 0, 0],
   };
 }
 
-async function runUmapLayout(
-  coordinates: Array<[number, number, number]>,
-  neighbors: Neighbor[][],
-  onStatus: StatusReporter,
-): Promise<Array<[number, number, number]>> {
-  const state = createLayoutState(coordinates, 0.025);
-  const iterations = iterationCount(coordinates.length, 56, 26, 16);
+async function projectTsne(vectors: number[][], onStatus: StatusReporter): Promise<ProjectionResult> {
+  onStatus({ phase: "projecting", message: "Preparing t-SNE distances", progress: 0.84 });
+  await yieldToBrowser();
+
+  const prepared = await prepareTsneInput(vectors);
+  const probabilities = jointProbabilities(prepared, tsnePerplexity(vectors.length));
+  const embedding = initialTsneEmbedding(prepared.length);
+  const updates = Array.from({ length: prepared.length }, () => [0, 0]);
+  const gains = Array.from({ length: prepared.length }, () => [1, 1]);
+  const iterations = tsneIterations(vectors.length);
+  const learningRate = Math.max(200, vectors.length / 12);
 
   for (let iteration = 0; iteration < iterations; iteration += 1) {
-    const decay = 1 - iteration / Math.max(iterations, 1);
-    const step = 0.028 * decay + 0.004;
-    for (let i = 0; i < coordinates.length; i += 1) {
-      const x = state.x[i];
-      const y = state.y[i];
-      let fx = 0;
-      let fy = 0;
+    const exaggeration = iteration < TSNE_EARLY_EXAGGERATION_ITERATIONS ? TSNE_EARLY_EXAGGERATION : 1;
+    const momentum = iteration < TSNE_EARLY_EXAGGERATION_ITERATIONS ? 0.5 : 0.8;
+    const gradients = tsneGradients(embedding, probabilities, exaggeration);
 
-      for (const neighbor of neighbors[i]) {
-        const j = neighbor.index;
-        const dx = state.x[j] - x;
-        const dy = state.y[j] - y;
-        const distance = Math.sqrt(dx * dx + dy * dy + EPSILON);
-        const target = Math.max(0.08, Math.min(1.8, neighbor.distance * 0.72));
-        const force = (distance - target) / distance;
-        fx += dx * force * 0.34;
-        fy += dy * force * 0.34;
+    for (let i = 0; i < embedding.length; i += 1) {
+      for (let dim = 0; dim < 2; dim += 1) {
+        gains[i][dim] = Math.sign(gradients[i][dim]) !== Math.sign(updates[i][dim]) ? gains[i][dim] + 0.2 : Math.max(gains[i][dim] * 0.8, 0.01);
+        updates[i][dim] = momentum * updates[i][dim] - learningRate * gains[i][dim] * gradients[i][dim];
+        embedding[i][dim] += updates[i][dim];
       }
-
-      for (let sample = 0; sample < 2; sample += 1) {
-        const j = hashedIndex(i, iteration, sample, coordinates.length);
-        if (j === i) continue;
-        const dx = x - state.x[j];
-        const dy = y - state.y[j];
-        const distanceSq = dx * dx + dy * dy + 0.08;
-        const force = Math.min(0.35, 0.018 / distanceSq);
-        fx += dx * force;
-        fy += dy * force;
-      }
-
-      state.x[i] += clamp(fx, -1, 1) * step;
-      state.y[i] += clamp(fy, -1, 1) * step;
     }
 
-    if (iteration % 4 === 3) {
-      onStatus({ phase: "projecting", message: "Optimizing UMAP layout", progress: 0.88 + (iteration / iterations) * 0.09 });
+    zeroMean(embedding);
+    if (iteration % 25 === 24) {
+      onStatus({ phase: "projecting", message: "Optimizing t-SNE layout", progress: 0.86 + (iteration / Math.max(iterations, 1)) * 0.11 });
       await yieldToBrowser();
     }
   }
 
-  return materializeLayout(state, coordinates, 0.72, "UMAP");
+  return {
+    coordinates: normalizeCoordinates(embedding.map(toCoordinate)),
+    explained: [0, 0, 0],
+  };
 }
 
-async function runTsneLayout(
-  coordinates: Array<[number, number, number]>,
-  neighbors: Neighbor[][],
-  onStatus: StatusReporter,
-): Promise<Array<[number, number, number]>> {
-  const state = createLayoutState(coordinates, 0.045);
-  const iterations = iterationCount(coordinates.length, 72, 32, 20);
+async function prepareTsneInput(vectors: number[][]) {
+  const dimensions = vectors[0]?.length ?? 0;
+  const componentLimit = Math.min(TSNE_TARGET_DIMENSIONS, vectors.length - 1, dimensions);
+  if (componentLimit < 2 || dimensions <= TSNE_TARGET_DIMENSIONS) {
+    return vectors;
+  }
 
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
-    const exaggeration = iteration < iterations * 0.38 ? 1.8 : 1;
-    const step = 0.024 * (1 - iteration / Math.max(iterations, 1)) + 0.0035;
-    for (let i = 0; i < coordinates.length; i += 1) {
-      const x = state.x[i];
-      const y = state.y[i];
-      let fx = 0;
-      let fy = 0;
+  return (await projectPcaMatrix(vectors, componentLimit)).rows;
+}
 
-      for (const neighbor of neighbors[i]) {
-        const j = neighbor.index;
-        const dx = state.x[j] - x;
-        const dy = state.y[j] - y;
-        const distanceSq = dx * dx + dy * dy + 0.04;
-        const similarity = Math.exp(-neighbor.distance * neighbor.distance * 0.42);
-        const force = (similarity * exaggeration) / (1 + distanceSq);
-        fx += dx * force * 0.12;
-        fy += dy * force * 0.12;
-      }
+function umapEpochs(length: number) {
+  if (length > 10000) return 200;
+  if (length > 1000) return 350;
+  return 500;
+}
 
-      for (let sample = 0; sample < 3; sample += 1) {
-        const j = hashedIndex(i, iteration, sample + 7, coordinates.length);
-        if (j === i) continue;
-        const dx = x - state.x[j];
-        const dy = y - state.y[j];
-        const distanceSq = dx * dx + dy * dy + 0.12;
-        const force = Math.min(0.42, 0.032 / distanceSq);
-        fx += dx * force;
-        fy += dy * force;
-      }
+function tsneIterations(length: number) {
+  if (length > 5000) return 500;
+  if (length > 1000) return 750;
+  return 1000;
+}
 
-      state.x[i] += clamp(fx, -1.2, 1.2) * step;
-      state.y[i] += clamp(fy, -1.2, 1.2) * step;
-    }
+function tsnePerplexity(length: number) {
+  return Math.max(2, Math.min(30, Math.floor((length - 1) / 3)));
+}
 
-    if (iteration % 4 === 3) {
-      onStatus({ phase: "projecting", message: "Optimizing t-SNE layout", progress: 0.88 + (iteration / iterations) * 0.09 });
-      await yieldToBrowser();
+function jointProbabilities(vectors: number[][], perplexity: number) {
+  const distances = pairwiseSquaredDistances(vectors);
+  const conditional = distances.map((row, index) => conditionalProbabilities(row, index, perplexity));
+  const count = vectors.length;
+  const probabilities = Array.from({ length: count }, () => Array.from({ length: count }, () => 0));
+
+  for (let i = 0; i < count; i += 1) {
+    for (let j = 0; j < count; j += 1) {
+      if (i === j) continue;
+      probabilities[i][j] = Math.max((conditional[i][j] + conditional[j][i]) / (2 * count), TSNE_EPSILON);
     }
   }
 
-  return materializeLayout(state, coordinates, 0.5, "t-SNE");
+  return probabilities;
 }
 
-function buildApproximateNeighbors(coordinates: Array<[number, number, number]>, neighborCount: number): Neighbor[][] {
-  const bins = new Map<string, number[]>();
-  const binCount = coordinates.length > 10000 ? 28 : 18;
+function conditionalProbabilities(distances: number[], selfIndex: number, perplexity: number) {
+  const targetEntropy = Math.log(perplexity);
+  let beta = 1;
+  let betaMin = -Infinity;
+  let betaMax = Infinity;
+  let probabilities = probabilityDistribution(distances, selfIndex, beta);
 
-  coordinates.forEach(([x, y], index) => {
-    const key = binKey(x, y, binCount);
-    const values = bins.get(key);
-    if (values) {
-      values.push(index);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const entropy = shannonEntropy(distances, selfIndex, beta);
+    const entropyDiff = entropy - targetEntropy;
+    if (Math.abs(entropyDiff) < 1e-5) break;
+
+    if (entropyDiff > 0) {
+      betaMin = beta;
+      beta = Number.isFinite(betaMax) ? (beta + betaMax) / 2 : beta * 2;
     } else {
-      bins.set(key, [index]);
-    }
-  });
-
-  return coordinates.map((coordinate, index) => {
-    const candidates = nearbyCandidates(coordinate, binCount, bins, index);
-    for (let sample = 0; sample < neighborCount * 2 && candidates.length < neighborCount * 3; sample += 1) {
-      candidates.push(hashedIndex(index, sample, 17, coordinates.length));
+      betaMax = beta;
+      beta = Number.isFinite(betaMin) ? (beta + betaMin) / 2 : beta / 2;
     }
 
-    return candidates
-      .filter((candidate) => candidate !== index)
-      .map((candidate) => ({
-        index: candidate,
-        distance: distance3(coordinate, coordinates[candidate]),
-      }))
-      .sort((left, right) => left.distance - right.distance)
-      .slice(0, neighborCount);
-  });
+    probabilities = probabilityDistribution(distances, selfIndex, beta);
+  }
+
+  return probabilities;
 }
 
-function nearbyCandidates(
-  [x, y]: [number, number, number],
-  binCount: number,
-  bins: Map<string, number[]>,
-  index: number,
-) {
-  const { bx, by } = binPosition(x, y, binCount);
-  const candidates: number[] = [];
-  for (let ox = -1; ox <= 1; ox += 1) {
-    for (let oy = -1; oy <= 1; oy += 1) {
-      const values = bins.get(`${bx + ox}:${by + oy}`) ?? [];
-      const stride = Math.max(1, Math.floor(values.length / 96));
-      const start = values.length ? hashedIndex(index, ox + 3, oy + 5, values.length) % stride : 0;
-      for (let i = start; i < values.length; i += stride) {
-        candidates.push(values[i]);
+function probabilityDistribution(distances: number[], selfIndex: number, beta: number) {
+  const probabilities = distances.map((distance, index) => (index === selfIndex ? 0 : Math.exp(-distance * beta)));
+  const sum = probabilities.reduce((total, value) => total + value, 0) || TSNE_EPSILON;
+  return probabilities.map((value) => value / sum);
+}
+
+function shannonEntropy(distances: number[], selfIndex: number, beta: number) {
+  let weightedDistance = 0;
+  let sum = 0;
+  for (let index = 0; index < distances.length; index += 1) {
+    if (index === selfIndex) continue;
+    const unnormalized = Math.exp(-distances[index] * beta);
+    weightedDistance += distances[index] * unnormalized;
+    sum += unnormalized;
+  }
+  return Math.log(sum || TSNE_EPSILON) + (beta * weightedDistance) / (sum || TSNE_EPSILON);
+}
+
+function pairwiseSquaredDistances(vectors: number[][]) {
+  return vectors.map((left, leftIndex) =>
+    vectors.map((right, rightIndex) => {
+      if (leftIndex === rightIndex) return 0;
+      let distance = 0;
+      for (let dim = 0; dim < left.length; dim += 1) {
+        const delta = (left[dim] ?? 0) - (right[dim] ?? 0);
+        distance += delta * delta;
       }
+      return distance;
+    }),
+  );
+}
+
+function initialTsneEmbedding(length: number) {
+  const random = seededRandom(987);
+  return Array.from({ length }, () => [(random() - 0.5) * 1e-4, (random() - 0.5) * 1e-4]);
+}
+
+function tsneGradients(embedding: number[][], probabilities: number[][], exaggeration: number) {
+  const count = embedding.length;
+  const numerators = Array.from({ length: count }, () => Array.from({ length: count }, () => 0));
+  let qSum = 0;
+
+  for (let i = 0; i < count; i += 1) {
+    for (let j = i + 1; j < count; j += 1) {
+      const dx = embedding[i][0] - embedding[j][0];
+      const dy = embedding[i][1] - embedding[j][1];
+      const numerator = 1 / (1 + dx * dx + dy * dy);
+      numerators[i][j] = numerator;
+      numerators[j][i] = numerator;
+      qSum += numerator * 2;
     }
   }
-  return candidates;
-}
 
-function createLayoutState(coordinates: Array<[number, number, number]>, noise: number) {
-  const x = new Float32Array(coordinates.length);
-  const y = new Float32Array(coordinates.length);
-  coordinates.forEach(([cx, cy], index) => {
-    const jitter = hashUnit(index + 1) - 0.5;
-    x[index] = cx * 0.78 + jitter * noise;
-    y[index] = cy * 0.78 + (hashUnit(index + 101) - 0.5) * noise;
-  });
-  return { x, y };
-}
-
-function materializeLayout(
-  state: { x: Float32Array; y: Float32Array },
-  coordinates: Array<[number, number, number]>,
-  zScale: number,
-  method: Exclude<ReductionMethod, "PCA">,
-): Array<[number, number, number]> {
-  return coordinates.map(([baseX, baseY, z], index) => {
-    const x = state.x[index];
-    const y = state.y[index];
-    const radius = Math.sqrt(x * x + y * y + EPSILON);
-    const angle = Math.atan2(y, x);
-
-    if (method === "UMAP") {
-      const shapedRadius = Math.pow(radius, 0.86) * 1.12;
-      const shapedAngle = angle + Math.sin(z * 1.7 + baseX * 0.25) * 0.12;
-      return [Math.cos(shapedAngle) * shapedRadius, Math.sin(shapedAngle) * shapedRadius, z * zScale] as [number, number, number];
+  const gradients = Array.from({ length: count }, () => [0, 0]);
+  for (let i = 0; i < count; i += 1) {
+    for (let j = 0; j < count; j += 1) {
+      if (i === j) continue;
+      const q = Math.max(numerators[i][j] / (qSum || TSNE_EPSILON), TSNE_EPSILON);
+      const multiplier = 4 * (probabilities[i][j] * exaggeration - q) * numerators[i][j];
+      gradients[i][0] += multiplier * (embedding[i][0] - embedding[j][0]);
+      gradients[i][1] += multiplier * (embedding[i][1] - embedding[j][1]);
     }
-
-    const islandRadius = Math.log1p(radius * 1.4) * 2.25;
-    const islandAngle = angle + Math.sin(z * 2.3 + radius) * 0.32;
-    return [
-      Math.cos(islandAngle) * islandRadius + Math.tanh(baseX) * 0.45,
-      Math.sin(islandAngle) * islandRadius + Math.tanh(baseY) * 0.45,
-      z * zScale,
-    ] as [number, number, number];
-  });
+  }
+  return gradients;
 }
 
-function binPosition(x: number, y: number, binCount: number) {
-  const bx = Math.max(0, Math.min(binCount - 1, Math.floor(((x + 5) / 10) * binCount)));
-  const by = Math.max(0, Math.min(binCount - 1, Math.floor(((y + 5) / 10) * binCount)));
-  return { bx, by };
+function zeroMean(embedding: number[][]) {
+  const mean = embedding.reduce(
+    (sum, point) => {
+      sum[0] += point[0];
+      sum[1] += point[1];
+      return sum;
+    },
+    [0, 0],
+  );
+  mean[0] /= Math.max(embedding.length, 1);
+  mean[1] /= Math.max(embedding.length, 1);
+  for (const point of embedding) {
+    point[0] -= mean[0];
+    point[1] -= mean[1];
+  }
 }
 
-function binKey(x: number, y: number, binCount: number) {
-  const { bx, by } = binPosition(x, y, binCount);
-  return `${bx}:${by}`;
+function toCoordinate(row: number[]) {
+  return [row[0] ?? 0, row[1] ?? 0, row[2] ?? 0] as [number, number, number];
 }
 
-function distance3(left: [number, number, number], right: [number, number, number]) {
-  const dx = left[0] - right[0];
-  const dy = left[1] - right[1];
-  const dz = left[2] - right[2];
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+function cosineDistance(left: number[], right: number[]) {
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    const leftValue = left[index] ?? 0;
+    const rightValue = right[index] ?? 0;
+    dot += leftValue * rightValue;
+    leftMagnitude += leftValue * leftValue;
+    rightMagnitude += rightValue * rightValue;
+  }
+
+  if (leftMagnitude === 0 || rightMagnitude === 0) return 1;
+  return 1 - dot / Math.sqrt(leftMagnitude * rightMagnitude);
 }
 
-function iterationCount(length: number, small: number, medium: number, large: number) {
-  if (length > 20000) return large;
-  if (length > 5000) return medium;
-  return small;
-}
-
-function hashedIndex(index: number, iteration: number, sample: number, length: number) {
-  if (length <= 1) return 0;
-  const value = Math.sin((index + 1) * 12.9898 + (iteration + 1) * 78.233 + (sample + 1) * 37.719) * 43758.5453;
-  return Math.abs(Math.floor(value)) % length;
-}
-
-function hashUnit(value: number) {
-  const hashed = Math.sin(value * 12.9898) * 43758.5453;
-  return hashed - Math.floor(hashed);
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
+function seededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
 }
 
 function yieldToBrowser() {

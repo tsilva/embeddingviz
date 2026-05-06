@@ -18,8 +18,8 @@ describe("PCA projection", () => {
     expect(normalizeCoordinates([[0, 0, 0]])).toEqual([[0, 0, 0]]);
   });
 
-  it("returns normalized finite coordinates from PCA", () => {
-    const result = projectPca([
+  it("returns normalized finite coordinates from PCA", async () => {
+    const result = await projectPca([
       [1, 0, 0],
       [0, 1, 0],
       [0, 0, 1],
