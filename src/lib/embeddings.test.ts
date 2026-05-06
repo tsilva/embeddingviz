@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MODEL_PRESETS } from "../data";
 import type { ModelPreset, PlannedEmbeddingSample } from "../types";
 import { __testing, createEmbeddingRun } from "./embeddings";
 import { projectReduction } from "./reductions";
@@ -127,6 +128,20 @@ describe("embedding internals", () => {
       ["model", 4],
       ["▁vector", 5],
     ]);
+  });
+
+  it("lists SmolLM2 layer outputs from final to first layer", () => {
+    const model = MODEL_PRESETS.find((preset) => preset.id === "HuggingFaceTB/SmolLM2-135M-Instruct");
+
+    expect(model?.recommendedOutput).toBe("final");
+    expect(model?.outputModes).toEqual([
+      "final",
+      ...Array.from({ length: 30 }, (_, index) => `hidden-${29 - index}`),
+      "tokens",
+    ]);
+    expect(__testing.outputLabel("hidden-29", "text-generation")).toBe("Layer 29 · LM value state");
+    expect(__testing.outputLabel("hidden-0", "text-generation")).toBe("Layer 0 · LM value state");
+    expect(__testing.layerFromOutputMode("hidden-12")).toBe(12);
   });
 
   it("rejects files incompatible with the selected model", () => {

@@ -509,7 +509,10 @@ async function extractCausalLmVectors(bundle: CausalLmBundle, texts: string[], o
     max_length: 96,
   });
   const outputs = await bundle.model(inputs);
-  const layer = outputMode === "final" ? inferLastLayer(outputs) : 4;
+  const layer = outputMode === "final" ? inferLastLayer(outputs) : layerFromOutputMode(outputMode);
+  if (layer === null) {
+    throw new Error(`SmolLM2 cannot use ${outputLabel(outputMode, "text-generation").toLowerCase()} as a layer state.`);
+  }
   const valueState = outputs[`present.${layer}.value`];
 
   if (!isTensorLike(valueState) || valueState.dims.length !== 4) {
@@ -806,9 +809,11 @@ function outputLabel(outputMode: OutputMode, task?: ModelPreset["task"]) {
   if (task === "text-generation") {
     if (outputMode === "final") return "Final LM value state";
     if (outputMode === "tokens") return "Tokenizer subword features";
-    return "Layer 4 · LM value state";
+    const layer = layerFromOutputMode(outputMode);
+    return layer === null ? "LM value state" : `Layer ${layer} · LM value state`;
   }
-  if (outputMode === "hidden-4") return "Layer 4 · hidden state";
+  const layer = layerFromOutputMode(outputMode);
+  if (layer !== null) return `Layer ${layer} · hidden state`;
   if (outputMode === "tokens") return "Token table · embeddings";
   return "Final embedding";
 }
@@ -853,6 +858,11 @@ function inferLastLayer(outputs: Record<string, unknown>) {
     .filter((value): value is string => Boolean(value))
     .map(Number);
   return layers.length ? Math.max(...layers) : 4;
+}
+
+function layerFromOutputMode(outputMode: OutputMode) {
+  const match = outputMode.match(/^hidden-(\d+)$/);
+  return match ? Number(match[1]) : null;
 }
 
 function isTensorLike(value: unknown): value is { data: ArrayLike<number>; dims: number[] } {
@@ -940,6 +950,8 @@ export function runColor(index: number) {
 export const __testing = {
   chunkTokenIds,
   displayToken,
+  layerFromOutputMode,
+  outputLabel,
   resolveTokenSamples,
   validateFiles,
 };

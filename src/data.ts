@@ -1,5 +1,8 @@
 import type { ModelPreset, TextSnippet } from "./types";
 
+const SMOLLM2_LAYER_COUNT = 30;
+const SMOLLM2_LAYER_OUTPUTS = Array.from({ length: SMOLLM2_LAYER_COUNT }, (_, index) => `hidden-${SMOLLM2_LAYER_COUNT - 1 - index}` as const);
+
 export const MODEL_PRESETS: ModelPreset[] = [
   {
     id: "Xenova/paraphrase-MiniLM-L3-v2",
@@ -28,8 +31,8 @@ export const MODEL_PRESETS: ModelPreset[] = [
     label: "SmolLM2-135M-Instruct",
     task: "text-generation",
     summary: "Language model · hidden-state workflow",
-    recommendedOutput: "hidden-4",
-    outputModes: ["final", "hidden-4", "tokens"],
+    recommendedOutput: "final",
+    outputModes: ["final", ...SMOLLM2_LAYER_OUTPUTS, "tokens"],
     maxInputTokens: 96,
     supportsImages: false,
     note: "Useful compatibility target for LM hidden-state exploration; final pooled embeddings are not the recommended default.",

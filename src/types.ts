@@ -1,6 +1,6 @@
 export type InputType = "text" | "files" | "tokens";
 export type ReductionMethod = "PCA" | "UMAP" | "t-SNE";
-export type OutputMode = "final" | "hidden-4" | "tokens";
+export type OutputMode = "final" | `hidden-${number}` | "tokens";
 
 export interface TextSnippet {
   id: string;

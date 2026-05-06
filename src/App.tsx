@@ -844,11 +844,18 @@ function outputLabel(outputMode: OutputMode, task?: typeof MODEL_PRESETS[number]
   if (task === "text-generation") {
     if (outputMode === "final") return "Final LM value state";
     if (outputMode === "tokens") return "Tokenizer subword features";
-    return "Layer 4 · LM value state";
+    const layer = layerFromOutputMode(outputMode);
+    return layer === null ? "LM value state" : `Layer ${layer} · LM value state`;
   }
-  if (outputMode === "hidden-4") return "Layer 4 · hidden state";
+  const layer = layerFromOutputMode(outputMode);
+  if (layer !== null) return `Layer ${layer} · hidden state`;
   if (outputMode === "tokens") return "Token table · embeddings";
   return "Final embedding";
+}
+
+function layerFromOutputMode(outputMode: OutputMode) {
+  const match = outputMode.match(/^hidden-(\d+)$/);
+  return match ? Number(match[1]) : null;
 }
 
 function classifyFileMime(mimeType: string): "text" | "image" | "unsupported" {
