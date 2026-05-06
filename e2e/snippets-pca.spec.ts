@@ -103,6 +103,47 @@ test("selected marker is only shown when the selected point is rendered", async 
   await expect(page.getByTestId("selected-point-marker")).toHaveCount(0);
 });
 
+test("run includes text still sitting in the composer", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  await page.getByTestId("input-composer").fill("delta draft input");
+
+  await expect(page.getByText("4 items")).toBeVisible();
+  await page.getByTestId("run-projection").click();
+
+  await expect(page.getByText("4 visible points")).toBeVisible();
+  await expect(page.getByTestId("selected-point-label")).toHaveText("The weather today is sunny and warm.");
+  await expect(page.getByTestId("input-composer")).toHaveValue("");
+  await expect(page.getByTitle("delta draft input")).toBeVisible();
+});
+
+test("hiding the only run clears hidden selected point details", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
+  await page.getByTestId("run-projection").click();
+  await expect(page.getByTestId("selected-point-label")).toHaveText("alpha forest");
+
+  await page.locator(".runCard input[type='checkbox']").uncheck();
+
+  await expect(page.getByText("0 visible points")).toBeVisible();
+  await expect(page.getByText("No visible points. Turn a run back on to show embeddings.")).toBeVisible();
+  await expect(page.getByText("No point selected.")).toBeVisible();
+  await expect(page.getByTestId("selected-point-label")).toHaveCount(0);
+});
+
+test("narrow viewports do not force desktop horizontal scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/?mockEmbeddings=1");
+
+  const metrics = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }));
+
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.viewportWidth + 2);
+});
+
 test("input widget shows token plan totals and per-snippet metadata", async ({ page }) => {
   await page.goto("/?mockEmbeddings=1");
 
@@ -139,6 +180,48 @@ test("selected tooltip label truncates long point labels", async ({ page }) => {
 
   const isClipped = await tooltipLabel.evaluate((element) => element.scrollWidth > element.clientWidth);
   expect(isClipped).toBe(true);
+});
+
+test("plot labels stay inside the visible chart area", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  await replaceInputs(page, [
+    "left edge label with enough text to exercise truncation",
+    "center label",
+    "right edge label with enough text to exercise truncation",
+  ]);
+
+  await page.getByTestId("run-projection").click();
+  await expect(page.getByText("3 visible points")).toBeVisible();
+
+  const plotBox = await page.locator(".plotCanvas").boundingBox();
+  expect(plotBox).not.toBeNull();
+
+  const labelRects = await page.getByTestId("point-label").evaluateAll((labels) =>
+    labels.map((label) => {
+      const rect = label.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        text: Array.from(label.childNodes)
+          .filter((node) => node.nodeType === Node.TEXT_NODE)
+          .map((node) => node.textContent)
+          .join("")
+          .trim(),
+      };
+    }),
+  );
+
+  expect(labelRects.length).toBeGreaterThan(0);
+  for (const rect of labelRects) {
+    expect(rect.left).toBeGreaterThanOrEqual(plotBox!.x - 1);
+    expect(rect.right).toBeLessThanOrEqual(plotBox!.x + plotBox!.width + 1);
+    expect(rect.top).toBeGreaterThanOrEqual(plotBox!.y - 1);
+    expect(rect.bottom).toBeLessThanOrEqual(plotBox!.y + plotBox!.height + 1);
+    expect(rect.text?.length ?? 0).toBeLessThanOrEqual(32);
+  }
 });
 
 test("nearest point results are ordered by similarity across visible runs", async ({ page }) => {

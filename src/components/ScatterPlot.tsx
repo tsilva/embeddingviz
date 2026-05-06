@@ -45,6 +45,8 @@ const MAX_ZOOM = 12;
 const ZOOM_STEP = 1.35;
 const INITIAL_VIEW: ViewState = { scale: 1, offsetX: 0, offsetY: 0 };
 const TOOLTIP_TITLE_WIDTH = 166;
+const PLOT_LABEL_MAX_CHARS = 32;
+const PLOT_LABEL_EDGE_GUTTER = 14;
 
 export function ScatterPlot({
   runs,
@@ -101,6 +103,16 @@ export function ScatterPlot({
   const showAmbientLabels = projected.length <= LABEL_LIMIT;
   const axisPrefix = primaryReduction === "PCA" ? "PC" : primaryReduction;
   const axisTicks = useMemo(() => buildAxisTicks(view), [view]);
+  const emptyMessage =
+    points.length === 0
+      ? runs.length > 0
+        ? "No visible points. Turn a run back on to show embeddings."
+        : "Run a projection to render embeddings."
+      : projected.length === 0
+        ? query
+          ? "No points match the current search."
+          : "No points in the selected neighborhood."
+        : "";
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -269,9 +281,14 @@ export function ScatterPlot({
           {projected.map(({ point, cx, cy }, index) => {
             const isSelected = point.id === selected?.point.id;
             const showLabel = isSelected || (query ? index % labelStride === 0 : showAmbientLabels && index % labelStride === 0);
+            const labelX = clamp(cx + (cx > WIDTH - 170 ? -12 : 12), PLOT_LABEL_EDGE_GUTTER, WIDTH - PLOT_LABEL_EDGE_GUTTER);
+            const labelY = clamp(cy - 8, PADDING - 16, HEIGHT - PADDING + 16);
+            const labelAnchor = cx > WIDTH - 170 ? "end" : "start";
+            const label = truncatePlotLabel(point.label);
             return showLabel ? (
-              <text className="pointLabel" x={cx + 12} y={cy - 8} key={point.id}>
-                {point.label}
+              <text className="pointLabel" x={labelX} y={labelY} textAnchor={labelAnchor} key={point.id} data-testid="point-label">
+                <title>{point.label}</title>
+                {label}
               </text>
             ) : null;
           })}
@@ -279,10 +296,10 @@ export function ScatterPlot({
           {selectedProjected ? <SelectedPointOverlay selected={selectedProjected} axisPrefix={axisPrefix} /> : null}
         </svg>
 
-        {points.length === 0 ? (
+        {emptyMessage ? (
           <div className="emptyPlot">
             <Box size={28} />
-            <span>Run a projection to render embeddings.</span>
+            <span>{emptyMessage}</span>
           </div>
         ) : null}
       </div>
@@ -480,6 +497,11 @@ function nearestPoint(points: ProjectedPoint[], x: number, y: number) {
     }
   }
   return nearest;
+}
+
+function truncatePlotLabel(label: string) {
+  const normalized = label.replace(/\s+/g, " ").trim();
+  return normalized.length > PLOT_LABEL_MAX_CHARS ? `${normalized.slice(0, PLOT_LABEL_MAX_CHARS - 3)}...` : normalized;
 }
 
 function hexToRgb(hex: string) {

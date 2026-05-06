@@ -65,13 +65,19 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
 
   const model = useMemo(() => MODEL_PRESETS.find((preset) => preset.id === modelId) ?? MODEL_PRESETS[0], [modelId]);
   const activeOutputMode = model.outputModes.includes(outputMode) ? outputMode : model.recommendedOutput;
+  const draftSnippetText = composerText.trim();
+  const visibleRuns = useMemo(() => runs.filter((run) => run.visible), [runs]);
   const selectedPoint = useMemo(
-    () => runs.flatMap((run) => run.points).find((point) => point.id === selectedPointId) ?? runs[0]?.points[0] ?? null,
-    [runs, selectedPointId],
+    () => {
+      const visiblePoints = visibleRuns.flatMap((run) => run.points);
+      if (visiblePoints.length === 0) return null;
+      return visiblePoints.find((point) => point.id === selectedPointId) ?? visiblePoints[0];
+    },
+    [selectedPointId, visibleRuns],
   );
   const selectedRun = useMemo(
-    () => (selectedPoint ? runs.find((run) => run.points.some((point) => point.id === selectedPoint.id)) ?? null : null),
-    [runs, selectedPoint],
+    () => (selectedPoint ? visibleRuns.find((run) => run.points.some((point) => point.id === selectedPoint.id)) ?? null : null),
+    [selectedPoint, visibleRuns],
   );
   const nearestNeighbors = useMemo(
     () => (selectedPoint ? nearestNeighborsForPoint(selectedPoint, runs, NEAREST_NEIGHBOR_LIMIT) : []),
@@ -87,12 +93,13 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   const effectiveInputType: InputType = activeOutputMode === "tokens" ? "tokens" : isImageModel ? "files" : "text";
   const isWorking = status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting";
   const isPlanning = inputPlanStatus.phase === "loading";
+  const draftInputCount = !isImageModel && draftSnippetText ? 1 : 0;
   const candidateInputCount =
     effectiveInputType === "tokens"
       ? 2
       : isImageModel
         ? files.length
-        : snippets.filter((snippet) => snippet.text.trim()).length + files.length;
+        : snippets.filter((snippet) => snippet.text.trim()).length + files.length + draftInputCount;
   const canRun = !isWorking && !isPlanning && candidateInputCount >= 2 && (!isImageModel || effectiveInputType === "files");
   const inputPlanItemsById = useMemo(() => new Map(inputPlan?.items.map((item) => [item.id, item]) ?? []), [inputPlan]);
 
@@ -118,6 +125,21 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
 
   async function handleRun() {
     try {
+      const runSnippets =
+        !isImageModel && draftSnippetText
+          ? [
+              ...snippets,
+              {
+                id: crypto.randomUUID(),
+                text: draftSnippetText,
+              },
+            ]
+          : snippets;
+      if (runSnippets !== snippets) {
+        setSnippets(runSnippets);
+        setComposerText("");
+      }
+
       setStatus({ phase: "loading", message: "Loading projection pipeline", progress: 0.02 });
       const embeddingModule = await import("./lib/embeddings");
       const services: EmbeddingServices = {
@@ -134,7 +156,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
           : await services.buildEmbeddingInputPlan({
               model,
               inputType: effectiveInputType,
-              snippets,
+              snippets: runSnippets,
               files,
               onStatus: setInputPlanStatus,
             });
@@ -146,7 +168,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         outputMode: activeOutputMode,
         inputType: effectiveInputType,
         reduction,
-        snippets,
+        snippets: runSnippets,
         files,
         inputPlan: preparedInputPlan,
         onStatus: setStatus,
