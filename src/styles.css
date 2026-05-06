@@ -90,63 +90,6 @@ button {
   background: #111827;
 }
 
-.topbarStatus {
-  display: grid;
-  grid-template-columns: minmax(170px, 1.3fr) minmax(118px, 0.7fr);
-  align-items: center;
-  min-width: 0;
-  flex: 0 1 390px;
-  height: 36px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--panel-soft);
-}
-
-.topbarStatusSegment {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  height: 100%;
-  border-right: 1px solid var(--border);
-  padding: 0 14px;
-  color: #0f172a;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.topbarStatusSegment:last-child {
-  border-right: 0;
-}
-
-.topbarStatusSegment.primary {
-  justify-content: flex-start;
-  gap: 9px;
-}
-
-.topbarStatusSegment.primary span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.topbarStatusSegment.primary svg {
-  flex: 0 0 auto;
-  color: var(--green);
-}
-
-.topbarStatusSegment.primary.loading svg,
-.topbarStatusSegment.primary.embedding svg,
-.topbarStatusSegment.primary.projecting svg {
-  color: var(--blue);
-}
-
-.topbarStatusSegment.primary.error svg {
-  color: var(--rose);
-}
-
 .topbarActions {
   display: flex;
   align-items: center;
@@ -1359,15 +1302,6 @@ button {
     grid-template-columns: 310px minmax(520px, 1fr) 300px;
   }
 
-  .topbarStatus {
-    flex-basis: 360px;
-    grid-template-columns: minmax(170px, 1.35fr) minmax(132px, 0.8fr);
-  }
-
-  .topbarStatusSegment {
-    padding: 0 14px;
-  }
-
   .topbarActions {
     gap: 10px;
   }
@@ -1396,16 +1330,6 @@ button {
 
   .brand {
     min-width: 0;
-  }
-
-  .topbarStatus {
-    order: 3;
-    flex: 1 1 100%;
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .topbarStatusSegment {
-    padding: 0 12px;
   }
 
   .topbarActions {
@@ -1482,21 +1406,6 @@ button {
 
   .runButton {
     flex: 0 0 auto;
-  }
-
-  .topbarStatus {
-    grid-template-columns: minmax(0, 1fr);
-    height: auto;
-  }
-
-  .topbarStatusSegment {
-    min-height: 36px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .topbarStatusSegment:last-child {
-    border-bottom: 0;
   }
 
   .plotToolbar {

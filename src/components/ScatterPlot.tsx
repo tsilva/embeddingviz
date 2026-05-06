@@ -8,7 +8,6 @@ interface ScatterPlotProps {
   query: string;
   is3d: boolean;
   reduction: ReductionMethod;
-  primaryReduction: ReductionMethod;
   neighborhoodPointIds: Set<string> | null;
   onQueryChange: (query: string) => void;
   onPointSelect: (point: EmbeddingPoint) => void;
@@ -56,7 +55,6 @@ export function ScatterPlot({
   query,
   is3d,
   reduction,
-  primaryReduction,
   neighborhoodPointIds,
   onQueryChange,
   onPointSelect,
@@ -106,7 +104,6 @@ export function ScatterPlot({
 
   const labelStride = query ? Math.max(Math.ceil(projected.length / 32), 1) : Math.max(Math.ceil(projected.length / 12), 1);
   const showAmbientLabels = projected.length <= LABEL_LIMIT;
-  const axisPrefix = primaryReduction === "PCA" ? "PC" : primaryReduction;
   const axisTicks = useMemo(() => buildAxisTicks(view), [view]);
   const emptyMessage =
     points.length === 0
@@ -247,7 +244,7 @@ export function ScatterPlot({
           className="pointCloudCanvas"
           width={WIDTH}
           height={HEIGHT}
-          aria-label={`2D ${primaryReduction} point cloud`}
+          aria-label="2D embedding point cloud"
           data-testid="point-cloud-canvas"
           onWheel={handleCanvasWheel}
           onMouseDown={handleCanvasMouseDown}
@@ -261,7 +258,7 @@ export function ScatterPlot({
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           preserveAspectRatio="none"
           role="img"
-          aria-label={`2D ${primaryReduction} scatter plot`}
+          aria-label="2D embedding scatter plot"
         >
           {axisTicks.x.map(({ value, position }) => (
             <g key={`x-${value}`}>
@@ -284,10 +281,10 @@ export function ScatterPlot({
           <line className="axisLine" x1={PADDING} x2={WIDTH - PADDING} y1={HEIGHT - PADDING} y2={HEIGHT - PADDING} />
           <line className="axisLine" x1={PADDING} x2={PADDING} y1={PADDING} y2={HEIGHT - PADDING} />
           <text className="axisLabel" x={WIDTH / 2} y={HEIGHT - 6} textAnchor="middle">
-            {axisPrefix} 1
+            Axis 1
           </text>
           <text className="axisLabel" transform={`translate(14 ${HEIGHT / 2}) rotate(-90)`} textAnchor="middle">
-            {axisPrefix} 2
+            Axis 2
           </text>
 
           {projected.map(({ point, cx, cy }, index) => {

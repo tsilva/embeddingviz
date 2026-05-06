@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 import {
-  Check,
   ChevronDown,
   FileText,
   Image as ImageIcon,
@@ -25,6 +24,7 @@ import type {
 
 const initialRuns: RunRecord[] = [];
 const NEAREST_NEIGHBOR_LIMIT = 10;
+const DEFAULT_SAMPLE_SNIPPET_COUNT = 12;
 
 type EmbeddingServices = Pick<typeof import("./lib/embeddings"), "buildEmbeddingInputPlan" | "createEmbeddingRun" | "runColor">;
 
@@ -38,7 +38,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   const [modelId, setModelId] = useState(MODEL_PRESETS[0].id);
   const [outputMode, setOutputMode] = useState<OutputMode>("final");
   const [reduction, setReduction] = useState<ReductionMethod>("PCA");
-  const [snippets, setSnippets] = useState<TextSnippet[]>(SAMPLE_SNIPPETS.slice(0, 3));
+  const [snippets, setSnippets] = useState<TextSnippet[]>(SAMPLE_SNIPPETS.slice(0, DEFAULT_SAMPLE_SNIPPET_COUNT));
   const [composerText, setComposerText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [fileMessage, setFileMessage] = useState("");
@@ -83,7 +83,6 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     if (!showNeighborhood || !selectedPoint) return null;
     return new Set([selectedPoint.id, ...nearestNeighbors.map((neighbor) => neighbor.point.id)]);
   }, [nearestNeighbors, selectedPoint, showNeighborhood]);
-  const totalVisible = runs.filter((run) => run.visible).reduce((sum, run) => sum + run.count, 0);
   const isImageModel = model.task === "image-feature-extraction";
   const isClipTextModel = model.task === "clip-text";
   const effectiveInputType: InputType = activeOutputMode === "tokens" ? "tokens" : isImageModel ? "files" : "text";
@@ -286,14 +285,6 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
           <span>EmbeddingViz</span>
         </div>
 
-        <div className="topbarStatus" aria-live="polite">
-          <div className={`topbarStatusSegment primary ${status.phase}`}>
-            {isWorking ? <Loader2 size={16} className="spin" /> : status.phase === "error" ? <X size={16} /> : <Check size={16} />}
-            <span>{status.message}</span>
-          </div>
-          <div className="topbarStatusSegment">{totalVisible.toLocaleString()} visible points</div>
-        </div>
-
         <div className="topbarActions">
           <button className="runButton" type="button" onClick={handleRun} disabled={!canRun} data-testid="run-projection">
             {isWorking ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
@@ -446,7 +437,6 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
           query={query}
           is3d={is3d}
           reduction={reduction}
-          primaryReduction={runs[0]?.reduction ?? reduction}
           neighborhoodPointIds={neighborhoodPointIds}
           onQueryChange={setQuery}
           onPointSelect={(point: EmbeddingPoint) => setSelectedPointId(point.id)}
@@ -471,7 +461,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                 <span className="swatch" style={{ backgroundColor: run.color }} />
                 <div className="runCardBody">
                   <strong>{run.name}</strong>
-                  <span>{run.reduction} · {run.count} points</span>
+                  <span>{run.model} · {run.count} points</span>
                 </div>
                 <label className="checkbox">
                   <span className="srOnly">{run.visible ? "Hide" : "Show"} {run.name}</span>

@@ -20,7 +20,7 @@ test("enter snippets, run PCA, select a point", async ({ page }) => {
   await page.getByTestId("reduction-PCA").click();
   await page.getByTestId("run-projection").click();
 
-  await expect(page.getByText("3 visible points")).toBeVisible();
+  await expect(page.getByText("paraphrase-MiniLM-L3-v2 · 3 points")).toBeVisible();
   await expect(page.getByTestId("selected-point-label")).toHaveText("alpha forest");
 
   const canvas = page.getByTestId("point-cloud-canvas");
@@ -42,7 +42,7 @@ test("selecting CLIP keeps text inputs runnable", async ({ page }) => {
   await page.getByLabel("Model").selectOption("Xenova/clip-vit-base-patch32");
 
   await expect(page.getByText("CLIP text/image encoders · ONNX ready")).toBeVisible();
-  await expect(page.getByText("3 items")).toBeVisible();
+  await expect(page.getByText("12 items")).toBeVisible();
   await expect(page.getByTestId("token-plan-overview")).toContainText("Text/image encoders route by type");
   await expect(page.getByTestId("input-composer")).toBeEditable();
   await expect(page.getByTestId("run-projection")).toBeEnabled();
@@ -79,7 +79,7 @@ test("axis tick labels update after zooming the projection", async ({ page }) =>
   await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
 
   await page.getByTestId("run-projection").click();
-  await expect(page.getByText("3 visible points")).toBeVisible();
+  await expect(page.getByTestId("selected-point-label")).toHaveText("alpha forest");
 
   await expect(page.getByTestId("x-axis-tick")).toHaveText(["-6", "-4", "-2", "0", "2", "4", "6"]);
 
@@ -108,11 +108,11 @@ test("run includes text still sitting in the composer", async ({ page }) => {
 
   await page.getByTestId("input-composer").fill("delta draft input");
 
-  await expect(page.getByText("4 items")).toBeVisible();
+  await expect(page.getByText("13 items")).toBeVisible();
   await page.getByTestId("run-projection").click();
 
-  await expect(page.getByText("4 visible points")).toBeVisible();
-  await expect(page.getByTestId("selected-point-label")).toHaveText("The weather today is sunny and warm.");
+  await expect(page.getByText("paraphrase-MiniLM-L3-v2 · 13 points")).toBeVisible();
+  await expect(page.getByTestId("selected-point-label")).toHaveText("Thunderstorms rolled across the harbor before sunrise.");
   await expect(page.getByTestId("input-composer")).toHaveValue("");
   await expect(page.getByTitle("delta draft input")).toBeVisible();
 });
@@ -126,7 +126,6 @@ test("hiding the only run clears hidden selected point details", async ({ page }
 
   await page.locator(".runCard input[type='checkbox']").uncheck();
 
-  await expect(page.getByText("0 visible points")).toBeVisible();
   await expect(page.getByText("No visible points. Turn a run back on to show embeddings.")).toBeVisible();
   await expect(page.getByText("No point selected.")).toBeVisible();
   await expect(page.getByTestId("selected-point-label")).toHaveCount(0);
@@ -192,7 +191,9 @@ test("plot labels stay inside the visible chart area", async ({ page }) => {
   ]);
 
   await page.getByTestId("run-projection").click();
-  await expect(page.getByText("3 visible points")).toBeVisible();
+  await expect(page.getByTestId("selected-point-label")).toHaveText(
+    "left edge label with enough text to exercise truncation",
+  );
 
   const plotBox = await page.locator(".plotCanvas").boundingBox();
   expect(plotBox).not.toBeNull();
@@ -294,9 +295,8 @@ test("nearest point results are ordered by similarity across visible runs", asyn
   await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
 
   await page.getByTestId("run-projection").click();
-  await expect(page.getByText("3 visible points")).toBeVisible();
+  await expect(page.getByTestId("selected-point-label")).toHaveText("previous close");
   await page.getByTestId("run-projection").click();
-  await expect(page.getByText("6 visible points")).toBeVisible();
   await expect(page.getByTestId("selected-point-label")).toHaveText("current anchor");
 
   const nearestLabels = page.getByTestId("nearest-row").locator("strong");
@@ -310,7 +310,7 @@ test("wheel zoom only captures scrolling while the left mouse button is down", a
 
   await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
   await page.getByTestId("run-projection").click();
-  await expect(page.getByText("3 visible points")).toBeVisible();
+  await expect(page.getByTestId("selected-point-label")).toHaveText("alpha forest");
 
   const canvas = page.getByTestId("point-cloud-canvas");
   const box = await canvas.boundingBox();

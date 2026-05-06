@@ -50,35 +50,51 @@ export const MODEL_PRESETS: ModelPreset[] = [
 export const SAMPLE_SNIPPETS: TextSnippet[] = [
   {
     id: "s1",
-    text: "The weather today is sunny and warm.",
+    text: "Thunderstorms rolled across the harbor before sunrise.",
   },
   {
     id: "s2",
-    text: "I love hiking in the mountains.",
+    text: "A cold front brought steady rain to the valley.",
   },
   {
     id: "s3",
-    text: "Machine learning models learn patterns.",
+    text: "Bright afternoon sunlight cleared the morning fog.",
   },
   {
     id: "s4",
-    text: "Transformers convert tokens into contextual vectors.",
+    text: "Trail runners climbed the ridge above the pine forest.",
   },
   {
     id: "s5",
-    text: "A kitten watched birds from the windowsill.",
+    text: "Backpackers followed a rocky path through alpine meadows.",
   },
   {
     id: "s6",
-    text: "Rain clouds gathered above the coast.",
+    text: "A mountain guide checked the map beside the campsite.",
   },
   {
     id: "s7",
-    text: "Trail runners crossed the forest ridge.",
+    text: "Neural networks learn useful patterns from examples.",
   },
   {
     id: "s8",
+    text: "Transformers convert tokens into contextual vectors.",
+  },
+  {
+    id: "s9",
     text: "Embedding spaces reveal semantic neighborhoods.",
+  },
+  {
+    id: "s10",
+    text: "The chef simmered tomato sauce with basil and garlic.",
+  },
+  {
+    id: "s11",
+    text: "Fresh bread cooled on the kitchen counter after baking.",
+  },
+  {
+    id: "s12",
+    text: "The recipe called for olive oil, lemon, and herbs.",
   },
 ];
 
