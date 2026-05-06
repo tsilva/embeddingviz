@@ -478,6 +478,14 @@ button {
   font-weight: 600;
 }
 
+.unifiedInputText .inputTextPreview {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
 .unifiedInputText .inputItemMeta {
   margin-top: 7px;
 }
