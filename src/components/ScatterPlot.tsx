@@ -7,10 +7,12 @@ interface ScatterPlotProps {
   selectedPointId: string | null;
   query: string;
   is3d: boolean;
+  reduction: ReductionMethod;
   primaryReduction: ReductionMethod;
   neighborhoodPointIds: Set<string> | null;
   onQueryChange: (query: string) => void;
   onPointSelect: (point: EmbeddingPoint) => void;
+  onReductionChange: (reduction: ReductionMethod) => void;
   onToggle3d: (enabled: boolean) => void;
 }
 
@@ -44,19 +46,21 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 12;
 const ZOOM_STEP = 1.35;
 const INITIAL_VIEW: ViewState = { scale: 1, offsetX: 0, offsetY: 0 };
-const TOOLTIP_TITLE_WIDTH = 166;
 const PLOT_LABEL_MAX_CHARS = 32;
 const PLOT_LABEL_EDGE_GUTTER = 14;
+const REDUCTION_METHODS: ReductionMethod[] = ["PCA", "UMAP", "t-SNE"];
 
 export function ScatterPlot({
   runs,
   selectedPointId,
   query,
   is3d,
+  reduction,
   primaryReduction,
   neighborhoodPointIds,
   onQueryChange,
   onPointSelect,
+  onReductionChange,
   onToggle3d,
 }: ScatterPlotProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -67,6 +71,7 @@ export function ScatterPlot({
     () => runs.filter((run) => run.visible).flatMap((run) => run.points.map((point) => ({ point, color: run.color }))),
     [runs],
   );
+  const hasPoints = points.length > 0;
   const selected = points.find(({ point }) => point.id === selectedPointId) ?? points[0];
   const filtered = useMemo(() => {
     const normalizedQuery = query.toLowerCase();
@@ -194,26 +199,42 @@ export function ScatterPlot({
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder="Search points..."
             aria-label="Search points"
+            disabled={!hasPoints}
           />
         </label>
 
+        <div className="segmented projectionMethods" aria-label="Reduction method">
+          {REDUCTION_METHODS.map((method) => (
+            <button
+              key={method}
+              className={reduction === method ? "active" : ""}
+              type="button"
+              onClick={() => onReductionChange(method)}
+              title={`Project with ${method}`}
+              data-testid={`reduction-${method}`}
+            >
+              {method}
+            </button>
+          ))}
+        </div>
+
         <div className="iconGroup" aria-label="Plot controls">
-          <button type="button" title="Zoom in" onClick={handleZoomIn}>
+          <button type="button" title="Zoom in" onClick={handleZoomIn} disabled={!hasPoints}>
             <ZoomIn size={18} />
           </button>
-          <button type="button" title="Zoom out" onClick={handleZoomOut}>
+          <button type="button" title="Zoom out" onClick={handleZoomOut} disabled={!hasPoints}>
             <ZoomOut size={18} />
           </button>
-          <button type="button" title="Reset view" onClick={handleResetView}>
+          <button type="button" title="Reset view" onClick={handleResetView} disabled={!hasPoints}>
             <RotateCcw size={18} />
           </button>
         </div>
 
         <div className="segmented small" aria-label="Projection dimension">
-          <button className={!is3d ? "active" : ""} type="button" onClick={() => onToggle3d(false)}>
+          <button className={!is3d ? "active" : ""} type="button" onClick={() => onToggle3d(false)} disabled={!hasPoints}>
             2D
           </button>
-          <button className={is3d ? "active" : ""} type="button" onClick={() => onToggle3d(true)}>
+          <button className={is3d ? "active" : ""} type="button" onClick={() => onToggle3d(true)} disabled={!hasPoints}>
             3D
           </button>
         </div>
@@ -242,12 +263,6 @@ export function ScatterPlot({
           role="img"
           aria-label={`2D ${primaryReduction} scatter plot`}
         >
-          <defs>
-            <filter id="tooltipShadow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="12" stdDeviation="10" floodOpacity="0.14" />
-            </filter>
-          </defs>
-
           {axisTicks.x.map(({ value, position }) => (
             <g key={`x-${value}`}>
               <line className="gridLine" x1={position} x2={position} y1={PADDING} y2={HEIGHT - PADDING} />
@@ -290,7 +305,7 @@ export function ScatterPlot({
             ) : null;
           })}
 
-          {selectedProjected ? <SelectedPointOverlay selected={selectedProjected} axisPrefix={axisPrefix} /> : null}
+          {selectedProjected ? <SelectedPointMarker selected={selectedProjected} /> : null}
         </svg>
 
         {emptyMessage ? (
@@ -304,40 +319,8 @@ export function ScatterPlot({
   );
 }
 
-function SelectedPointOverlay({ selected, axisPrefix }: { selected: ProjectedPoint; axisPrefix: string }) {
-  const { point, color, cx, cy } = selected;
-  return (
-    <>
-      <circle className="selectedPointRing" cx={cx} cy={cy} r="8" fill={color} data-testid="selected-point-marker" />
-      <g transform={`translate(${Math.min(cx + 34, WIDTH - 246)} ${Math.max(cy - 20, 74)})`}>
-        <rect className="tooltipPanel" width="218" height="104" rx="8" filter="url(#tooltipShadow)" />
-        <circle cx="20" cy="24" r="6" fill={color} />
-        <foreignObject x="36" y="12" width={TOOLTIP_TITLE_WIDTH} height="24">
-          <div className="tooltipTitle" data-testid="selected-point-tooltip-label" title={point.label}>
-            {point.label}
-          </div>
-        </foreignObject>
-        <text className="tooltipKey" x="18" y="58">
-          Output
-        </text>
-        <text className="tooltipValue" x="78" y="58">
-          {point.output}
-        </text>
-        <text className="tooltipKey" x="18" y="84">
-          {axisPrefix} 1
-        </text>
-        <text className="tooltipValue" x="78" y="84">
-          {point.x.toFixed(2)}
-        </text>
-        <text className="tooltipKey" x="132" y="84">
-          {axisPrefix} 2
-        </text>
-        <text className="tooltipValue" x="174" y="84">
-          {point.y.toFixed(2)}
-        </text>
-      </g>
-    </>
-  );
+function SelectedPointMarker({ selected }: { selected: ProjectedPoint }) {
+  return <circle className="selectedPointRing" cx={selected.cx} cy={selected.cy} r="8" fill={selected.color} data-testid="selected-point-marker" />;
 }
 
 function renderWebGlPoints(

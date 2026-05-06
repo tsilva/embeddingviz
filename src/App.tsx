@@ -295,20 +295,6 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         </div>
 
         <div className="topbarActions">
-          <div className="topbarReduction segmented" aria-label="Reduction method">
-            {(["PCA", "UMAP", "t-SNE"] as ReductionMethod[]).map((method) => (
-              <button
-                key={method}
-                className={reduction === method ? "active" : ""}
-                type="button"
-                onClick={() => setReduction(method)}
-                title={`Project with ${method}`}
-                data-testid={`reduction-${method}`}
-              >
-                {method}
-              </button>
-            ))}
-          </div>
           <button className="runButton" type="button" onClick={handleRun} disabled={!canRun} data-testid="run-projection">
             {isWorking ? <Loader2 size={17} className="spin" /> : <Play size={17} fill="currentColor" />}
             Run
@@ -459,10 +445,12 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
           selectedPointId={selectedPointId}
           query={query}
           is3d={is3d}
+          reduction={reduction}
           primaryReduction={runs[0]?.reduction ?? reduction}
           neighborhoodPointIds={neighborhoodPointIds}
           onQueryChange={setQuery}
           onPointSelect={(point: EmbeddingPoint) => setSelectedPointId(point.id)}
+          onReductionChange={setReduction}
           onToggle3d={setIs3d}
         />
 
@@ -481,12 +469,12 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
             {runs.map((run) => (
               <div className={`runCard ${run.current ? "current" : ""}`} key={run.id}>
                 <span className="swatch" style={{ backgroundColor: run.color }} />
-                <div>
+                <div className="runCardBody">
                   <strong>{run.name}</strong>
-                  <span>{run.output} · {run.reduction}</span>
-                  <small>{run.model} · {run.count} points</small>
+                  <span>{run.reduction} · {run.count} points</span>
                 </div>
                 <label className="checkbox">
+                  <span className="srOnly">{run.visible ? "Hide" : "Show"} {run.name}</span>
                   <input type="checkbox" checked={run.visible} onChange={() => toggleRunVisibility(run.id)} />
                 </label>
               </div>
@@ -501,27 +489,29 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                   {selectedPoint.kind === "token" ? "Subword token" : selectedPoint.kind === "image" ? "Image" : "Label"}
                 </span>
                 <strong data-testid="selected-point-label">{selectedPoint.label}</strong>
-                <p>
+                <p className="selectedSummary">
                   {selectedPoint.kind === "token"
                     ? `Raw token ${selectedPoint.rawToken ?? selectedPoint.snippet}${selectedPoint.tokenId === undefined ? "" : ` · id ${selectedPoint.tokenId}`}`
                     : selectedPoint.snippet}
                 </p>
-                {selectedPoint.kind !== "token" && selectedPoint.chunkIndex ? (
-                  <>
-                    <span className="metaLabel">Chunk</span>
+                <div className="selectedMetaStrip">
+                  <span>{selectedPoint.source}</span>
+                  <span>{selectedPoint.output}</span>
+                  <span>{selectedPoint.vector.length} dims</span>
+                </div>
+                <details className="selectedDetails">
+                  <summary>Details</summary>
+                  {selectedPoint.kind !== "token" && selectedPoint.chunkIndex ? (
                     <p>
-                      {selectedPoint.chunkIndex} of {selectedPoint.chunkCount ?? 1}
+                      Chunk {selectedPoint.chunkIndex} of {selectedPoint.chunkCount ?? 1}
                       {selectedPoint.tokenStart && selectedPoint.tokenEnd
                         ? ` · tokens ${selectedPoint.tokenStart.toLocaleString()}-${selectedPoint.tokenEnd.toLocaleString()}`
                         : ""}
                       {selectedPoint.tokenCount ? ` · ${selectedPoint.tokenCount.toLocaleString()} tokens` : ""}
                     </p>
-                  </>
-                ) : null}
-                <span className="metaLabel">Source</span>
-                <p>{selectedPoint.source} · {selectedPoint.output}</p>
-                <span className="metaLabel">Dimensions</span>
-                <p>{selectedPoint.vector.length}</p>
+                  ) : null}
+                  <p>{selectedPoint.kind === "token" ? "Tokenizer item" : selectedPoint.kind === "image" ? "Image embedding" : "Text embedding"}</p>
+                </details>
                 <div className="nearestPanel">
                   <div className="nearestHeader">
                     <div>
@@ -580,6 +570,10 @@ function TokenPlanOverview({
   isImageModel: boolean;
   isClipTextModel: boolean;
 }) {
+  if (!inputPlan && status.phase === "idle") {
+    return null;
+  }
+
   if (isImageModel) {
     return (
       <div className="unifiedTokenPlan" data-testid="token-plan-overview">
@@ -637,18 +631,7 @@ function TokenPlanOverview({
   }
 
   if (!inputPlan) {
-    return (
-      <div className="unifiedTokenPlan" data-testid="token-plan-overview">
-        <div className="tokenPlanTitle">
-          <span>Token plan</span>
-          <small>Pending run</small>
-        </div>
-        <div className="tokenPlanStats">
-          <span>{maxInputTokens.toLocaleString()} token model max</span>
-          <span>Chunks appear after Run</span>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -678,22 +661,8 @@ function InputItemMetadata({
   isImageModel?: boolean;
   isClipTextModel?: boolean;
 }) {
-  if (isImageModel) {
-    return (
-      <div className="inputItemMeta image" data-testid="input-item-meta">
-        <span>Image embedding</span>
-        <small>not token chunked</small>
-      </div>
-    );
-  }
-
-  if (isClipTextModel) {
-    return (
-      <div className="inputItemMeta pending" data-testid="input-item-meta">
-        <span>CLIP routed</span>
-        <small>by input type</small>
-      </div>
-    );
+  if (isImageModel || isClipTextModel) {
+    return null;
   }
 
   if (item) {
@@ -724,12 +693,7 @@ function InputItemMetadata({
     );
   }
 
-  return (
-    <div className="inputItemMeta pending" data-testid="input-item-meta">
-      <span>Pending</span>
-      <small>Run to count tokens</small>
-    </div>
-  );
+  return null;
 }
 
 function devMockEmbeddingServices(): Partial<EmbeddingServices> {
