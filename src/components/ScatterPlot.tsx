@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, ZoomIn, ZoomOut, RotateCcw, Move, Box } from "lucide-react";
+import { Search, ZoomIn, ZoomOut, RotateCcw, Box } from "lucide-react";
 import type { EmbeddingPoint, ReductionMethod, RunRecord } from "../types";
 
 interface ScatterPlotProps {
@@ -203,9 +203,6 @@ export function ScatterPlot({
           </button>
           <button type="button" title="Zoom out" onClick={handleZoomOut}>
             <ZoomOut size={18} />
-          </button>
-          <button type="button" title="Pan by dragging the plot">
-            <Move size={18} />
           </button>
           <button type="button" title="Reset view" onClick={handleResetView}>
             <RotateCcw size={18} />

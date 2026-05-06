@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 import {
-  BrainCircuit,
   Check,
   ChevronDown,
-  Database,
   FileText,
   Image as ImageIcon,
   Loader2,
   Play,
-  Plus,
-  Sparkles,
   Type,
   X,
 } from "lucide-react";
@@ -290,14 +286,6 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
           <span>EmbeddingViz</span>
         </div>
 
-        <div className="runtimeChip">
-          <Database size={16} />
-          Hugging Face
-        </div>
-        <div className="runtimeChip">
-          <BrainCircuit size={16} />
-          transformers.js local
-        </div>
         <div className="topbarStatus" aria-live="polite">
           <div className={`topbarStatusSegment primary ${status.phase}`}>
             {isWorking ? <Loader2 size={16} className="spin" /> : status.phase === "error" ? <X size={16} /> : <Check size={16} />}
@@ -374,10 +362,6 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
               </select>
               <ChevronDown size={16} />
             </div>
-            <p className="recommend">
-              <Sparkles size={13} />
-              Recommended
-            </p>
           </section>
 
           {activeOutputMode === "tokens" ? (
@@ -484,17 +468,14 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
 
         <aside className="rightPanel">
           <div className="panelHeader">
-            <h2>Runs</h2>
-            <button type="button" onClick={handleRun} disabled={!canRun}>
-              <Plus size={16} />
-              New run
-            </button>
+            <h2>Inspector</h2>
+            <span>{runs.length.toLocaleString()} {runs.length === 1 ? "run" : "runs"}</span>
           </div>
 
           <div className="runsList">
             {runs.length === 0 ? (
               <div className="emptyRuns">
-                <span>Run comparison appears here after projection.</span>
+                <span>Run comparison appears after projection.</span>
               </div>
             ) : null}
             {runs.map((run) => (
@@ -512,7 +493,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
             ))}
           </div>
 
-          <div className="selectedPanel">
+          <div className="selectedPanel" aria-label="Selected point">
             <h2>Selected point</h2>
             {selectedPoint ? (
               <>
