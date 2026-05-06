@@ -392,7 +392,6 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                           <Type size={16} />
                           <div className="unifiedInputText">
                             <strong title={snippet.text}>{trimText(snippet.text, 54)}</strong>
-                            <span>Typed text</span>
                             <InputItemMetadata item={inputPlanItemsById.get(snippet.id)} status={inputPlanStatus} isClipTextModel={isClipTextModel} />
                           </div>
                           <button type="button" title="Remove input" onClick={() => removeSnippet(snippet.id)} data-testid="remove-input">
