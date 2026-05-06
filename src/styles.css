@@ -98,6 +98,36 @@ button {
   margin-left: auto;
 }
 
+.githubLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #475569;
+  text-decoration: none;
+}
+
+.githubLink:hover {
+  background: var(--panel-soft);
+  border-color: transparent;
+  color: #0f172a;
+}
+
+.githubLink:focus-visible {
+  border-color: var(--border-strong);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.14);
+}
+
+.githubMark {
+  width: 18px;
+  height: 18px;
+}
+
 .runButton {
   display: inline-flex;
   align-items: center;
