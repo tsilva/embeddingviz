@@ -39,7 +39,6 @@ const PADDING = 58;
 const AXIS_LIMIT = 6;
 const CENTER_X = WIDTH / 2;
 const CENTER_Y = HEIGHT / 2;
-const LABEL_LIMIT = 2000;
 const PICK_RADIUS = 12;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 12;
@@ -47,6 +46,7 @@ const ZOOM_STEP = 1.35;
 const INITIAL_VIEW: ViewState = { scale: 1, offsetX: 0, offsetY: 0 };
 const PLOT_LABEL_MAX_CHARS = 32;
 const PLOT_LABEL_EDGE_GUTTER = 14;
+const SEARCH_LABEL_LIMIT = 8;
 const REDUCTION_METHODS: ReductionMethod[] = ["PCA", "UMAP", "t-SNE"];
 
 export function ScatterPlot({
@@ -65,6 +65,7 @@ export function ScatterPlot({
   const dragRef = useRef<{ startX: number; startY: number; startView: ViewState; moved: boolean } | null>(null);
   const primaryButtonDownRef = useRef(false);
   const [view, setView] = useState<ViewState>(INITIAL_VIEW);
+  const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
   const points = useMemo<PlotPoint[]>(
     () => runs.filter((run) => run.visible).flatMap((run) => run.points.map((point) => ({ point, color: run.color }))),
     [runs],
@@ -101,9 +102,15 @@ export function ScatterPlot({
     if (!selected) return null;
     return projected.find(({ point }) => point.id === selected.point.id) ?? null;
   }, [projected, selected]);
+  const hoveredProjected = useMemo(() => {
+    if (!hoveredPointId || hoveredPointId === selectedProjected?.point.id) return null;
+    return projected.find(({ point }) => point.id === hoveredPointId) ?? null;
+  }, [hoveredPointId, projected, selectedProjected?.point.id]);
 
-  const labelStride = query ? Math.max(Math.ceil(projected.length / 32), 1) : Math.max(Math.ceil(projected.length / 12), 1);
-  const showAmbientLabels = projected.length <= LABEL_LIMIT;
+  const searchLabels = useMemo(() => {
+    if (!query) return [];
+    return projected.filter(({ point }) => point.id !== selectedProjected?.point.id && point.id !== hoveredProjected?.point.id).slice(0, SEARCH_LABEL_LIMIT);
+  }, [hoveredProjected?.point.id, projected, query, selectedProjected?.point.id]);
   const axisTicks = useMemo(() => buildAxisTicks(view), [view]);
   const emptyMessage =
     points.length === 0
@@ -152,19 +159,24 @@ export function ScatterPlot({
   }
 
   function handleCanvasMouseMove(event: React.MouseEvent<HTMLCanvasElement>) {
-    const drag = dragRef.current;
-    if (!drag) return;
     const { x, y } = canvasPoint(event);
-    const dx = x - drag.startX;
-    const dy = y - drag.startY;
-    if (Math.abs(dx) + Math.abs(dy) > 2) {
-      drag.moved = true;
+    const drag = dragRef.current;
+    if (drag) {
+      const dx = x - drag.startX;
+      const dy = y - drag.startY;
+      if (Math.abs(dx) + Math.abs(dy) > 2) {
+        drag.moved = true;
+        setHoveredPointId(null);
+      }
+      setView({
+        ...drag.startView,
+        offsetX: drag.startView.offsetX + dx,
+        offsetY: drag.startView.offsetY + dy,
+      });
+      return;
     }
-    setView({
-      ...drag.startView,
-      offsetX: drag.startView.offsetX + dx,
-      offsetY: drag.startView.offsetY + dy,
-    });
+
+    setHoveredPointId(nearestPoint(projected, x, y)?.point.id ?? null);
   }
 
   function handleCanvasMouseUp() {
@@ -172,6 +184,11 @@ export function ScatterPlot({
     window.setTimeout(() => {
       dragRef.current = null;
     }, 0);
+  }
+
+  function handleCanvasMouseLeave() {
+    setHoveredPointId(null);
+    handleCanvasMouseUp();
   }
 
   function handleCanvasClick(event: React.MouseEvent<HTMLCanvasElement>) {
@@ -250,7 +267,7 @@ export function ScatterPlot({
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
-          onMouseLeave={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseLeave}
           onClick={handleCanvasClick}
         />
         <svg
@@ -287,23 +304,16 @@ export function ScatterPlot({
             Axis 2
           </text>
 
-          {projected.map(({ point, cx, cy }, index) => {
-            const isSelected = point.id === selected?.point.id;
-            const showLabel = isSelected || (query ? index % labelStride === 0 : showAmbientLabels && index % labelStride === 0);
-            const labelX = clamp(cx + (cx > WIDTH - 170 ? -12 : 12), PLOT_LABEL_EDGE_GUTTER, WIDTH - PLOT_LABEL_EDGE_GUTTER);
-            const labelY = clamp(cy - 8, PADDING - 16, HEIGHT - PADDING + 16);
-            const labelAnchor = cx > WIDTH - 170 ? "end" : "start";
-            const label = truncatePlotLabel(point.label);
-            return showLabel ? (
-              <text className="pointLabel" x={labelX} y={labelY} textAnchor={labelAnchor} key={point.id} data-testid="point-label">
-                <title>{point.label}</title>
-                {label}
-              </text>
-            ) : null;
-          })}
+          {searchLabels.map((item) => (
+            <PlotPointLabel key={item.point.id} projected={item} />
+          ))}
 
           {selectedProjected ? <SelectedPointMarker selected={selectedProjected} /> : null}
+          {hoveredProjected ? <HoverPointMarker hovered={hoveredProjected} /> : null}
         </svg>
+
+        {selectedProjected ? <PointTooltip projected={selectedProjected} tone="selected" /> : null}
+        {hoveredProjected ? <PointTooltip projected={hoveredProjected} tone="hovered" /> : null}
 
         {emptyMessage ? (
           <div className="emptyPlot">
@@ -316,8 +326,50 @@ export function ScatterPlot({
   );
 }
 
+function PlotPointLabel({ projected }: { projected: ProjectedPoint }) {
+  const labelX = clamp(projected.cx + (projected.cx > WIDTH - 170 ? -12 : 12), PLOT_LABEL_EDGE_GUTTER, WIDTH - PLOT_LABEL_EDGE_GUTTER);
+  const labelY = clamp(projected.cy - 8, PADDING - 16, HEIGHT - PADDING + 16);
+  const labelAnchor = projected.cx > WIDTH - 170 ? "end" : "start";
+  const label = truncatePlotLabel(projected.point.label);
+  return (
+    <text className="pointLabel searchPointLabel" x={labelX} y={labelY} textAnchor={labelAnchor} data-testid="point-label">
+      <title>{projected.point.label}</title>
+      {label}
+    </text>
+  );
+}
+
 function SelectedPointMarker({ selected }: { selected: ProjectedPoint }) {
   return <circle className="selectedPointRing" cx={selected.cx} cy={selected.cy} r="8" fill={selected.color} data-testid="selected-point-marker" />;
+}
+
+function HoverPointMarker({ hovered }: { hovered: ProjectedPoint }) {
+  return <circle className="hoveredPointRing" cx={hovered.cx} cy={hovered.cy} r="7" fill="none" data-testid="hovered-point-marker" />;
+}
+
+function PointTooltip({ projected, tone }: { projected: ProjectedPoint; tone: "selected" | "hovered" }) {
+  const tooltipWidth = 220;
+  const tooltipHeight = 34;
+  const left = clamp(projected.cx + (projected.cx > WIDTH - 260 ? -tooltipWidth - 14 : 14), 8, WIDTH - tooltipWidth - 8);
+  const top = clamp(projected.cy - tooltipHeight - 12, 8, HEIGHT - tooltipHeight - 8);
+  const style = {
+    left: `${(left / WIDTH) * 100}%`,
+    top: `${(top / HEIGHT) * 100}%`,
+    width: `${(tooltipWidth / WIDTH) * 100}%`,
+  };
+
+  return (
+    <div className={`pointTooltip ${tone}`} style={style}>
+      <span className="pointTooltipSwatch" style={{ backgroundColor: projected.color }} />
+      <span
+        className="pointTooltipLabel"
+        title={projected.point.label}
+        data-testid={tone === "selected" ? "selected-point-tooltip-label" : "hovered-point-tooltip-label"}
+      >
+        {projected.point.label}
+      </span>
+    </div>
+  );
 }
 
 function renderWebGlPoints(
@@ -388,7 +440,7 @@ function createProgram(gl: WebGLRenderingContext) {
         v_color = a_color;
         v_focus = a_focus;
         gl_Position = vec4(a_position, 0.0, 1.0);
-        gl_PointSize = mix(2.0, 10.0, v_focus);
+        gl_PointSize = mix(9.0, 18.0, v_focus);
       }
     `,
   );
@@ -404,9 +456,12 @@ function createProgram(gl: WebGLRenderingContext) {
         vec2 delta = gl_PointCoord - vec2(0.5);
         float dist = length(delta);
         if (dist > 0.5) discard;
-        float alpha = smoothstep(0.5, 0.32, dist);
-        vec3 color = mix(v_color, vec3(0.06, 0.09, 0.16), v_focus * 0.35);
-        gl_FragColor = vec4(color, alpha * 0.88);
+        float alpha = smoothstep(0.5, 0.38, dist);
+        float edge = smoothstep(0.37, 0.48, dist);
+        vec3 fill = mix(v_color, vec3(0.04, 0.07, 0.13), v_focus * 0.18);
+        vec3 rim = mix(vec3(1.0), vec3(0.06, 0.09, 0.16), 0.42 + v_focus * 0.28);
+        vec3 color = mix(fill, rim, edge);
+        gl_FragColor = vec4(color, alpha * 0.96);
       }
     `,
   );
@@ -453,10 +508,13 @@ function renderCanvasPoints(
     const selected = point.id === selectedPointId;
     const neighbor = !selected && neighborhoodPointIds?.has(point.id);
     context.beginPath();
-    context.arc(cx, cy, selected ? 5 : neighbor ? 3.2 : 1.5, 0, Math.PI * 2);
+    context.arc(cx, cy, selected ? 9 : neighbor ? 6.5 : 5.2, 0, Math.PI * 2);
     context.fillStyle = selected ? "#0f172a" : color;
-    context.globalAlpha = selected || neighbor ? 1 : 0.85;
+    context.globalAlpha = selected || neighbor ? 1 : 0.94;
     context.fill();
+    context.lineWidth = 1.2;
+    context.strokeStyle = "#ffffff";
+    context.stroke();
   }
   context.globalAlpha = 1;
 }

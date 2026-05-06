@@ -560,10 +560,6 @@ function TokenPlanOverview({
   isImageModel: boolean;
   isClipTextModel: boolean;
 }) {
-  if (!inputPlan && status.phase === "idle") {
-    return null;
-  }
-
   if (isImageModel) {
     return (
       <div className="unifiedTokenPlan" data-testid="token-plan-overview">
@@ -589,6 +585,21 @@ function TokenPlanOverview({
         <div className="tokenPlanStats">
           <span>{maxInputTokens.toLocaleString()} token model max</span>
           <span>Text/image encoders route by type</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!inputPlan && status.phase === "idle") {
+    return (
+      <div className="unifiedTokenPlan" data-testid="token-plan-overview">
+        <div className="tokenPlanTitle">
+          <span>Token plan</span>
+          <small>Chunks appear after Run</small>
+        </div>
+        <div className="tokenPlanStats">
+          <span>{maxInputTokens.toLocaleString()} token model max</span>
+          <span>Prepared before projection</span>
         </div>
       </div>
     );

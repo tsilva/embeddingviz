@@ -883,10 +883,62 @@ button {
   stroke-linejoin: round;
 }
 
+.searchPointLabel {
+  opacity: 0.9;
+}
+
 .selectedPointRing {
   opacity: 0.94;
   stroke: #0f172a;
   stroke-width: 2px;
+}
+
+.hoveredPointRing {
+  opacity: 0.82;
+  stroke: #0f172a;
+  stroke-width: 1.8px;
+  stroke-dasharray: 2 2;
+}
+
+.pointTooltip {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  min-width: 0;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.13);
+  color: #0f172a;
+  padding: 0 10px;
+  pointer-events: none;
+}
+
+.pointTooltip.hovered {
+  opacity: 0.92;
+}
+
+.pointTooltipSwatch {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border: 1px solid rgba(15, 23, 42, 0.22);
+  border-radius: 50%;
+}
+
+.pointTooltipLabel {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .emptyPlot {

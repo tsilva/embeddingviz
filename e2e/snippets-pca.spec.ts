@@ -181,7 +181,7 @@ test("selected tooltip label truncates long point labels", async ({ page }) => {
   expect(isClipped).toBe(true);
 });
 
-test("plot labels stay inside the visible chart area", async ({ page }) => {
+test("ambient labels stay suppressed and search labels stay inside the visible chart area", async ({ page }) => {
   await page.goto("/?mockEmbeddings=1");
 
   await replaceInputs(page, [
@@ -194,6 +194,8 @@ test("plot labels stay inside the visible chart area", async ({ page }) => {
   await expect(page.getByTestId("selected-point-label")).toHaveText(
     "left edge label with enough text to exercise truncation",
   );
+  await expect(page.getByTestId("point-label")).toHaveCount(0);
+  await page.getByLabel("Search points").fill("label");
 
   const plotBox = await page.locator(".plotCanvas").boundingBox();
   expect(plotBox).not.toBeNull();
@@ -316,8 +318,8 @@ test("wheel zoom only captures scrolling while the left mouse button is down", a
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
 
-  const alphaLabel = page.locator(".pointLabel", { hasText: "alpha forest" });
-  const initialX = await alphaLabel.getAttribute("x");
+  const selectedMarker = page.getByTestId("selected-point-marker");
+  const initialX = await selectedMarker.getAttribute("cx");
 
   await canvas.hover({
     position: {
@@ -326,12 +328,12 @@ test("wheel zoom only captures scrolling while the left mouse button is down", a
     },
   });
   await page.mouse.wheel(0, -200);
-  await expect(alphaLabel).toHaveAttribute("x", initialX!);
+  await expect(selectedMarker).toHaveAttribute("cx", initialX!);
 
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
   await page.mouse.down({ button: "left" });
   await page.mouse.wheel(0, -200);
   await page.mouse.up({ button: "left" });
 
-  await expect(alphaLabel).not.toHaveAttribute("x", initialX!);
+  await expect(selectedMarker).not.toHaveAttribute("cx", initialX!);
 });
