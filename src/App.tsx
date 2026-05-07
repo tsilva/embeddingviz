@@ -42,6 +42,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   const [composerText, setComposerText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [fileMessage, setFileMessage] = useState("");
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<Record<string, string>>({});
   const [inputPlan, setInputPlan] = useState<EmbeddingInputPlan | null>(null);
   const [inputPlanStatus, setInputPlanStatus] = useState<PipelineStatus>({
     phase: "idle",
@@ -111,12 +112,25 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     }
 
     if (isClipTextModel) {
-      setInputPlanStatus({ phase: "idle", message: "CLIP encoders load in worker on Run", progress: 0 });
+      setInputPlanStatus({ phase: "idle", message: "Text chunks will be prepared on Run", progress: 0 });
       return;
     }
 
     setInputPlanStatus({ phase: "idle", message: "Token plan will be prepared on Run", progress: 0 });
   }, [effectiveInputType, files, isClipTextModel, isImageModel, model, snippets]);
+
+  useEffect(() => {
+    const nextPreviewUrls = Object.fromEntries(
+      files
+        .filter((file) => classifyFile(file) === "image")
+        .map((file) => [filePlanItemId(file), URL.createObjectURL(file)]),
+    );
+
+    setImagePreviewUrls(nextPreviewUrls);
+    return () => {
+      Object.values(nextPreviewUrls).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [files]);
 
   async function handleRun() {
     try {
@@ -146,7 +160,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         ...embeddingServices,
       };
       const preparedInputPlan =
-        effectiveInputType === "tokens" || isImageModel || isClipTextModel
+        effectiveInputType === "tokens" || isImageModel
           ? null
           : await services.buildEmbeddingInputPlan({
               model,
@@ -403,7 +417,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                           <div className="unifiedInputText">
                             <strong title={snippet.text}>{trimText(snippet.text, 54)}</strong>
                             <span className="inputTextPreview" title={snippet.text}>{snippet.text}</span>
-                            <InputItemMetadata item={inputPlanItemsById.get(snippet.id)} status={inputPlanStatus} isClipTextModel={isClipTextModel} />
+                            <InputItemMetadata item={inputPlanItemsById.get(snippet.id)} status={inputPlanStatus} />
                           </div>
                           <button type="button" title="Remove input" onClick={() => removeSnippet(snippet.id)} data-testid="remove-input">
                             <X size={15} />
@@ -413,21 +427,27 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                     : null}
                   {files.map((file) => {
                     const itemId = filePlanItemId(file);
-                    const isImageFile = classifyFile(file) === "image";
+                    const fileKind = classifyFile(file);
+                    const isImageFile = fileKind === "image";
                     const FileIcon = isImageFile ? ImageIcon : FileText;
+                    const previewUrl = isImageFile ? imagePreviewUrls[itemId] : undefined;
                     return (
-                      <div className="unifiedInputRow" key={itemId} data-testid="input-row">
+                      <div className={`unifiedInputRow ${previewUrl ? "hasImagePreview" : ""}`} key={itemId} data-testid="input-row">
                         <FileIcon size={16} />
                         <div className="unifiedInputText">
                           <strong title={file.name}>{file.name}</strong>
-                          <span>{isImageFile ? "Image" : "File"} · {fileDetailLabel(file)}</span>
+                          <span>{fileKind === "image" ? "Image" : fileKind === "pdf" ? "PDF" : "File"} · {fileDetailLabel(file)}</span>
                           <InputItemMetadata
                             item={inputPlanItemsById.get(itemId)}
                             status={inputPlanStatus}
                             isImageModel={isImageModel}
-                            isClipTextModel={isClipTextModel}
                           />
                         </div>
+                        {previewUrl ? (
+                          <div className="imageHoverPreview" data-testid="image-hover-preview" aria-hidden="true">
+                            <img src={previewUrl} alt="" />
+                          </div>
+                        ) : null}
                         <button type="button" title="Remove input" onClick={() => removeFile(itemId)} data-testid="remove-input">
                           <X size={15} />
                         </button>
@@ -596,16 +616,16 @@ function TokenPlanOverview({
     );
   }
 
-  if (isClipTextModel) {
+  if (isClipTextModel && !inputPlan && status.phase === "idle") {
     return (
       <div className="unifiedTokenPlan" data-testid="token-plan-overview">
         <div className="tokenPlanTitle">
-          <span>Input plan</span>
-          <small>CLIP multimodal run</small>
+          <span>Text/image plan</span>
+          <small>Chunks appear after Run</small>
         </div>
         <div className="tokenPlanStats">
           <span>{maxInputTokens.toLocaleString()} token model max</span>
-          <span>Text/image encoders route by type</span>
+          <span>Images route direct</span>
         </div>
       </div>
     );
@@ -676,14 +696,12 @@ function InputItemMetadata({
   item,
   status,
   isImageModel = false,
-  isClipTextModel = false,
 }: {
   item?: InputPlanItem;
   status: PipelineStatus;
   isImageModel?: boolean;
-  isClipTextModel?: boolean;
 }) {
-  if (isImageModel || isClipTextModel) {
+  if (isImageModel) {
     return null;
   }
 
@@ -730,12 +748,14 @@ function devMockEmbeddingServices(): Partial<EmbeddingServices> {
   return {
     buildEmbeddingInputPlan: async ({ model, inputType, snippets, files, onStatus }) => {
       const fileInputs = await Promise.all(
-        files.map(async (file) => ({
-          id: filePlanItemId(file),
-          label: file.name,
-          text: (await file.text()).trim() || file.name,
-          source: file.name,
-        })),
+        files
+          .filter((file) => classifyFile(file) !== "image")
+          .map(async (file) => ({
+            id: filePlanItemId(file),
+            label: file.name,
+            text: (await file.text()).trim() || file.name,
+            source: file.name,
+          })),
       );
       const textInputs = snippets.map((snippet, index) => {
         const label = snippet.text.trim();
@@ -890,7 +910,8 @@ function layerFromOutputMode(outputMode: OutputMode) {
   return match ? Number(match[1]) : null;
 }
 
-function classifyFileMime(mimeType: string): "text" | "image" | "unsupported" {
+function classifyFileMime(mimeType: string): "text" | "image" | "pdf" | "unsupported" {
+  if (mimeType === "application/pdf") return "pdf";
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("text/")) return "text";
   if (["application/json", "application/csv", "application/xml", "application/x-ndjson"].includes(mimeType)) return "text";
@@ -900,6 +921,7 @@ function classifyFileMime(mimeType: string): "text" | "image" | "unsupported" {
 function classifyFile(file: File) {
   const mimeKind = classifyFileMime(file.type);
   if (mimeKind !== "unsupported") return mimeKind;
+  if (/\.pdf$/i.test(file.name)) return "pdf";
   if (/\.(txt|md|csv|json|jsonl|ndjson|xml)$/i.test(file.name)) return "text";
   return "unsupported";
 }
@@ -907,14 +929,14 @@ function classifyFile(file: File) {
 function isMimeCompatibleWithModel(mimeType: string, model: typeof MODEL_PRESETS[number]) {
   const kind = classifyFileMime(mimeType);
   if (kind === "image") return model.supportsImages;
-  if (kind === "text") return model.task !== "image-feature-extraction";
+  if (kind === "text" || kind === "pdf") return model.task !== "image-feature-extraction";
   return false;
 }
 
 function isFileCompatibleWithModel(file: File, model: typeof MODEL_PRESETS[number]) {
   const kind = classifyFile(file);
   if (kind === "image") return model.supportsImages;
-  if (kind === "text") return model.task !== "image-feature-extraction";
+  if (kind === "text" || kind === "pdf") return model.task !== "image-feature-extraction";
   return false;
 }
 

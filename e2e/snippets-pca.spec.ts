@@ -1,8 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function replaceInputs(page: Page, inputs: string[]) {
-  while ((await page.getByTestId("remove-input").count()) > 0) {
-    await page.getByTestId("remove-input").first().click();
+  const removeButtons = page.getByTestId("remove-input");
+  await expect(page.getByTestId("input-row")).toHaveCount(12);
+
+  for (let count = await removeButtons.count(); count > 0; count -= 1) {
+    await removeButtons.first().click();
+    await expect(removeButtons).toHaveCount(count - 1);
   }
 
   const composer = page.getByTestId("input-composer");
@@ -43,10 +47,55 @@ test("selecting CLIP keeps text inputs runnable", async ({ page }) => {
 
   await expect(page.getByText("CLIP text/image encoders · ONNX ready")).toBeVisible();
   await expect(page.getByText("12 items")).toBeVisible();
-  await expect(page.getByTestId("token-plan-overview")).toContainText("Text/image encoders route by type");
+  await expect(page.getByTestId("token-plan-overview")).toContainText("Images route direct");
   await expect(page.getByTestId("input-composer")).toBeEditable();
   await expect(page.getByTestId("run-projection")).toBeEnabled();
   await expect(page.getByLabel("Output")).toHaveValue("final");
+});
+
+test("dropped image inputs reveal a hover preview", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  await page.getByLabel("Model").selectOption("Xenova/clip-vit-base-patch32");
+  await page.getByTestId("input-composer").dispatchEvent("drop", {
+    dataTransfer: await page.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="12"><rect width="16" height="12" fill="#2563eb"/></svg>`;
+      transfer.items.add(new File([svg], "hover-preview.svg", { type: "image/svg+xml" }));
+      return transfer;
+    }),
+  });
+
+  const imageRow = page.getByTestId("input-row").filter({ hasText: "hover-preview.svg" });
+  await expect(imageRow).toBeVisible();
+  await expect(imageRow.getByTestId("image-hover-preview")).toBeHidden();
+
+  await imageRow.hover();
+
+  await expect(imageRow.getByTestId("image-hover-preview")).toBeVisible();
+  const previewImage = imageRow.locator(".imageHoverPreview img");
+  await expect(previewImage).toHaveAttribute("src", /^blob:/);
+  await expect(previewImage).toHaveJSProperty("naturalWidth", 16);
+});
+
+test("dropped PDFs are accepted as chunked text inputs", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  await page.getByTestId("input-composer").dispatchEvent("drop", {
+    dataTransfer: await page.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(["%PDF-1.4 searchable text"], "research-notes.pdf", { type: "application/pdf" }));
+      return transfer;
+    }),
+  });
+
+  const pdfRow = page.getByTestId("input-row").filter({ hasText: "research-notes.pdf" });
+  await expect(page.getByText("13 items")).toBeVisible();
+  await expect(pdfRow).toContainText("PDF · application/pdf");
+
+  await page.getByTestId("run-projection").click();
+
+  await expect(pdfRow.getByTestId("input-item-meta")).toContainText("1 chunk");
 });
 
 test("selected marker stays aligned with the canvas point in a stretched plot", async ({ page }) => {
@@ -114,7 +163,7 @@ test("run includes text still sitting in the composer", async ({ page }) => {
   await expect(page.getByText("paraphrase-MiniLM-L3-v2 · 13 points")).toBeVisible();
   await expect(page.getByTestId("selected-point-label")).toHaveText("Thunderstorms rolled across the harbor before sunrise.");
   await expect(page.getByTestId("input-composer")).toHaveValue("");
-  await expect(page.getByTitle("delta draft input")).toBeVisible();
+  await expect(page.getByTestId("input-row").filter({ hasText: "delta draft input" }).locator("strong")).toHaveText("delta draft input");
 });
 
 test("hiding the only run clears hidden selected point details", async ({ page }) => {

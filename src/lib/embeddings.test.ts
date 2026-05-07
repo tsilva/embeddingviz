@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MODEL_PRESETS } from "../data";
 import type { ModelPreset, PlannedEmbeddingSample } from "../types";
-import { __testing, createEmbeddingRun } from "./embeddings";
+import { __testing, buildEmbeddingInputPlan, createEmbeddingRun } from "./embeddings";
 import { projectReduction } from "./reductions";
 
 vi.mock("@huggingface/transformers", () => ({
@@ -147,9 +147,39 @@ describe("embedding internals", () => {
   it("rejects files incompatible with the selected model", () => {
     const imageFile = new File(["png"], "plot.png", { type: "image/png" });
     const markdownFile = new File(["# notes"], "notes.md", { type: "" });
+    const pdfFile = new File(["%PDF"], "notes.pdf", { type: "application/pdf" });
 
     expect(() => __testing.validateFiles(textModel, "files", [markdownFile])).not.toThrow();
+    expect(() => __testing.validateFiles(textModel, "files", [pdfFile])).not.toThrow();
     expect(() => __testing.validateFiles(textModel, "files", [imageFile])).toThrow("Text Model cannot embed image/png");
+  });
+
+  it("extracts PDF text before token planning and chunking", async () => {
+    const pdfFile = new File([makePdf("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi")], "notes.pdf", {
+      type: "application/pdf",
+    });
+    const statuses: string[] = [];
+
+    const plan = await buildEmbeddingInputPlan({
+      model: { ...textModel, maxInputTokens: 4 },
+      inputType: "text",
+      snippets: [],
+      files: [pdfFile],
+      onStatus: (status) => statuses.push(status.message),
+    });
+
+    expect(plan.items).toEqual([
+      expect.objectContaining({
+        label: "notes.pdf",
+        source: "notes.pdf",
+        status: "chunked",
+      }),
+    ]);
+    expect(plan.items[0].tokenCount).toBeGreaterThan(8);
+    expect(plan.items[0].chunkCount).toBeGreaterThan(1);
+    expect(plan.samples.length).toBe(plan.items[0].chunkCount);
+    expect(plan.totalChunks).toBe(plan.items[0].chunkCount);
+    expect(statuses.at(-1)).toMatch(/\d+ tokens · \d+ chunks/);
   });
 
   it("creates a projected run from planned text samples", async () => {
@@ -233,3 +263,32 @@ describe("embedding internals", () => {
     );
   });
 });
+
+function makePdf(text: string) {
+  const stream = `BT /F1 8 Tf 20 120 Td (${escapePdfText(text)}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 160] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return pdf;
+}
+
+function escapePdfText(text: string) {
+  return text.replace(/[\\()]/g, (match) => `\\${match}`);
+}

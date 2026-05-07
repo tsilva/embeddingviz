@@ -1,4 +1,5 @@
 import type { ProgressInfo } from "@huggingface/transformers";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import type {
   EmbeddingInputPlan,
   EmbeddingPoint,
@@ -13,6 +14,7 @@ import type {
 } from "../types";
 
 type TransformersModule = typeof import("@huggingface/transformers");
+type PdfJsModule = typeof import("pdfjs-dist");
 type FeatureExtractor = (texts: string[], options: { pooling: string; normalize: boolean }) => Promise<{ tolist(): unknown }>;
 type ImageFeatureExtractor = (images: File[], options?: { pool?: boolean }) => Promise<{ tolist(): unknown }>;
 type Tokenizer = {
@@ -71,6 +73,7 @@ const clipTextCache = new Map<string, Promise<ClipTextBundle>>();
 const clipVisionCache = new Map<string, Promise<ClipVisionBundle>>();
 const tokenizerCache = new Map<string, Promise<Tokenizer>>();
 let transformersPromise: Promise<TransformersModule> | null = null;
+let pdfJsPromise: Promise<PdfJsModule> | null = null;
 
 async function loadTransformers() {
   if (!transformersPromise) {
@@ -83,6 +86,23 @@ async function loadTransformers() {
   }
 
   return transformersPromise;
+}
+
+async function loadPdfJs() {
+  if (!pdfJsPromise) {
+    const pdfjsImport =
+      typeof DOMMatrix === "undefined"
+        ? (import("pdfjs-dist/legacy/build/pdf.mjs") as Promise<PdfJsModule>)
+        : import("pdfjs-dist");
+    pdfJsPromise = pdfjsImport.then((pdfjs) => {
+      if (typeof Worker !== "undefined") {
+        pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+      }
+      return pdfjs;
+    });
+  }
+
+  return pdfJsPromise;
 }
 
 export async function createEmbeddingRun({
@@ -108,9 +128,11 @@ export async function createEmbeddingRun({
   validateFiles(model, inputType, files);
 
   const samples =
-    inputType === "tokens" || model.task === "image-feature-extraction" || model.task === "clip-text"
+    inputType === "tokens" || model.task === "image-feature-extraction"
       ? await resolveSamples(inputType, snippets, files, model, onStatus)
-      : resolvePlannedSamples(inputPlan);
+      : model.task === "clip-text"
+        ? await resolveClipSamples(inputType, snippets, files, model, inputPlan, onStatus)
+        : resolvePlannedSamples(inputPlan);
   if (samples.length < 2) {
     throw new Error("Add at least two inputs before running a projection.");
   }
@@ -371,7 +393,11 @@ function resolvePlannedSamples(inputPlan?: EmbeddingInputPlan | null): ResolvedS
     throw new Error("Token count is still being prepared. Wait for the input plan before running.");
   }
 
-  return inputPlan.samples.map((sample) => ({
+  return inputPlan.samples.map(plannedSampleToResolved);
+}
+
+function plannedSampleToResolved(sample: PlannedEmbeddingSample): ResolvedSample {
+  return {
     text: sample.text,
     label: sample.label,
     parentLabel: sample.parentLabel,
@@ -382,7 +408,7 @@ function resolvePlannedSamples(inputPlan?: EmbeddingInputPlan | null): ResolvedS
     chunkCount: sample.chunkCount,
     tokenStart: sample.tokenStart,
     tokenEnd: sample.tokenEnd,
-  }));
+  };
 }
 
 async function extractVectors(
@@ -639,6 +665,43 @@ async function resolveSamples(
   ];
 }
 
+async function resolveClipSamples(
+  inputType: InputType,
+  snippets: TextSnippet[],
+  files: File[],
+  model: ModelPreset,
+  inputPlan: EmbeddingInputPlan | null | undefined,
+  onStatus: (status: PipelineStatus) => void,
+) {
+  if (!inputPlan) {
+    return resolveSamples(inputType, snippets, files, model, onStatus);
+  }
+
+  return [
+    ...snippets.flatMap((snippet) => plannedSamplesForInput(inputPlan, snippet.id)),
+    ...files.flatMap((file) => {
+      if (classifyFile(file) === "image" && model.supportsImages) {
+        return [
+          {
+            text: imageDescription(file),
+            label: file.name,
+            source: file.name,
+            kind: "image" as const,
+            image: file,
+          },
+        ];
+      }
+
+      return plannedSamplesForInput(inputPlan, `${file.name}-${file.size}-${file.lastModified}`);
+    }),
+  ];
+}
+
+function plannedSamplesForInput(inputPlan: EmbeddingInputPlan, inputId: string) {
+  const prefix = `${inputId}-`;
+  return inputPlan.samples.filter((sample) => sample.id.startsWith(prefix)).map(plannedSampleToResolved);
+}
+
 function snippetInputs(snippets: TextSnippet[]) {
   return snippets.map((snippet, index) => {
     const text = normalizeText(snippet.text);
@@ -653,9 +716,9 @@ function snippetInputs(snippets: TextSnippet[]) {
 
 async function fileInputs(files: File[]) {
   return Promise.all(
-    files.map(async (file) => ({
+    files.filter(isTextLikeFile).map(async (file) => ({
       id: `${file.name}-${file.size}-${file.lastModified}`,
-      text: await file.text(),
+      text: await extractFileText(file),
       label: file.name,
       source: file.name,
     })),
@@ -676,8 +739,8 @@ async function fileSamples(files: File[], model: ModelPreset): Promise<ResolvedS
         };
       }
 
-      if (kind === "text" && model.task !== "image-feature-extraction") {
-        const text = trimText(await file.text(), 260);
+      if ((kind === "text" || kind === "pdf") && model.task !== "image-feature-extraction") {
+        const text = trimText(await extractFileText(file), 260);
         if (!text) return null;
         return {
           text,
@@ -696,6 +759,59 @@ async function fileSamples(files: File[], model: ModelPreset): Promise<ResolvedS
 
 function normalizeText(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function isTextLikeFile(file: File) {
+  const kind = classifyFile(file);
+  return kind === "text" || kind === "pdf";
+}
+
+async function extractFileText(file: File) {
+  return classifyFile(file) === "pdf" ? extractPdfText(file) : file.text();
+}
+
+async function extractPdfText(file: File) {
+  const pdfjs = await loadPdfJs();
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(await file.arrayBuffer()),
+    isImageDecoderSupported: false,
+    isOffscreenCanvasSupported: false,
+    stopAtErrors: false,
+    useWorkerFetch: false,
+  });
+
+  try {
+    const pdf = await loadingTask.promise;
+    const pageTexts: string[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const pageText = textContentItemsToText(content.items);
+      if (pageText) {
+        pageTexts.push(pageText);
+      }
+      page.cleanup();
+    }
+
+    return pageTexts.join("\n\n");
+  } finally {
+    await loadingTask.destroy();
+  }
+}
+
+function textContentItemsToText(items: unknown[]) {
+  return normalizeText(
+    items
+      .map((item) => {
+        if (!isPdfTextItem(item)) return "";
+        return item.hasEOL ? `${item.str}\n` : `${item.str} `;
+      })
+      .join(""),
+  );
+}
+
+function isPdfTextItem(item: unknown): item is { str: string; hasEOL?: boolean } {
+  return typeof item === "object" && item !== null && "str" in item && typeof item.str === "string";
 }
 
 function effectiveChunkSize(tokenizer: Tokenizer, model: ModelPreset) {
@@ -875,7 +991,8 @@ function isTensorLike(value: unknown): value is { data: ArrayLike<number>; dims:
   );
 }
 
-function classifyFileMime(mimeType: string): "text" | "image" | "unsupported" {
+function classifyFileMime(mimeType: string): "text" | "image" | "pdf" | "unsupported" {
+  if (mimeType === "application/pdf") return "pdf";
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("text/")) return "text";
   if (["application/json", "application/csv", "application/xml", "application/x-ndjson"].includes(mimeType)) return "text";
@@ -885,6 +1002,7 @@ function classifyFileMime(mimeType: string): "text" | "image" | "unsupported" {
 function classifyFile(file: File) {
   const mimeKind = classifyFileMime(file.type);
   if (mimeKind !== "unsupported") return mimeKind;
+  if (/\.pdf$/i.test(file.name)) return "pdf";
   if (/\.(txt|md|csv|json|jsonl|ndjson|xml)$/i.test(file.name)) return "text";
   return "unsupported";
 }
@@ -892,7 +1010,7 @@ function classifyFile(file: File) {
 function isFileCompatibleWithModel(file: File, model: ModelPreset) {
   const kind = classifyFile(file);
   if (kind === "image") return model.supportsImages;
-  if (kind === "text") return model.task !== "image-feature-extraction";
+  if (kind === "text" || kind === "pdf") return model.task !== "image-feature-extraction";
   return false;
 }
 
@@ -950,6 +1068,7 @@ export function runColor(index: number) {
 export const __testing = {
   chunkTokenIds,
   displayToken,
+  extractFileText,
   layerFromOutputMode,
   outputLabel,
   resolveTokenSamples,
