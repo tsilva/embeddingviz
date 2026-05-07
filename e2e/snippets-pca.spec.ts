@@ -78,6 +78,37 @@ test("dropped image inputs reveal a hover preview", async ({ page }) => {
   await expect(previewImage).toHaveJSProperty("naturalWidth", 16);
 });
 
+test("image inputs stay listed but disabled after switching to a text-only model", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  await page.getByLabel("Model").selectOption("Xenova/clip-vit-base-patch32");
+  await page.getByTestId("input-composer").dispatchEvent("drop", {
+    dataTransfer: await page.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="12"><rect width="16" height="12" fill="#2563eb"/></svg>`;
+      transfer.items.add(new File([svg], "kept-image.svg", { type: "image/svg+xml" }));
+      return transfer;
+    }),
+  });
+
+  const imageRow = page.getByTestId("input-row").filter({ hasText: "kept-image.svg" });
+  await expect(imageRow).toBeVisible();
+  await expect(page.getByText("13 items")).toBeVisible();
+
+  await page.getByLabel("Model").selectOption("Xenova/paraphrase-MiniLM-L3-v2");
+
+  await expect(imageRow).toBeVisible();
+  await expect(imageRow).toHaveAttribute("aria-disabled", "true");
+  await expect(imageRow.getByTestId("input-item-meta")).toContainText("Unsupported");
+  await expect(imageRow.getByTestId("input-item-meta")).toContainText("Not embedded by paraphrase-MiniLM-L3-v2");
+  await expect(page.getByText("12 items")).toBeVisible();
+
+  await page.getByTestId("run-projection").click();
+
+  await expect(page.getByText("paraphrase-MiniLM-L3-v2 · 12 points")).toBeVisible();
+  await expect(page.getByTestId("selected-point-label")).not.toHaveText("kept-image.svg");
+});
+
 test("dropped PDFs are accepted as chunked text inputs", async ({ page }) => {
   await page.goto("/?mockEmbeddings=1");
 
@@ -96,6 +127,40 @@ test("dropped PDFs are accepted as chunked text inputs", async ({ page }) => {
   await page.getByTestId("run-projection").click();
 
   await expect(pdfRow.getByTestId("input-item-meta")).toContainText("1 chunk");
+});
+
+test("files can be dropped anywhere in the app", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  const dataTransfer = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(["global drop text"], "global-notes.md", { type: "text/markdown" }));
+    return transfer;
+  });
+
+  await page.locator(".rightPanel").dispatchEvent("dragenter", { dataTransfer });
+  await expect(page.getByTestId("global-drop-overlay")).toContainText("Drop files to add them");
+
+  await page.locator(".rightPanel").dispatchEvent("drop", { dataTransfer });
+
+  await expect(page.getByTestId("global-drop-overlay")).toHaveCount(0);
+  await expect(page.getByTestId("input-row").filter({ hasText: "global-notes.md" })).toBeVisible();
+  await expect(page.getByText("13 items")).toBeVisible();
+});
+
+test("unsupported file drags show the unsupported overlay", async ({ page }) => {
+  await page.goto("/?mockEmbeddings=1");
+
+  const dataTransfer = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(["fake image"], "unsupported-image.png", { type: "image/png" }));
+    return transfer;
+  });
+
+  await page.locator(".rightPanel").dispatchEvent("dragenter", { dataTransfer });
+
+  await expect(page.getByTestId("global-drop-overlay")).toContainText("File is not supported");
+  await expect(page.getByTestId("global-drop-overlay")).toContainText("Supported files: text and PDF.");
 });
 
 test("selected marker stays aligned with the canvas point in a stretched plot", async ({ page }) => {

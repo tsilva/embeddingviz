@@ -53,6 +53,51 @@ button {
   background: var(--bg);
 }
 
+.globalDropOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(15, 23, 42, 0.28);
+  pointer-events: none;
+}
+
+.globalDropOverlayPanel {
+  display: grid;
+  gap: 8px;
+  width: min(360px, 100%);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.2);
+  padding: 22px;
+  text-align: center;
+}
+
+.globalDropOverlayPanel strong {
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.globalDropOverlayPanel span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.globalDropOverlay.unsupported .globalDropOverlayPanel {
+  border-color: rgba(244, 63, 114, 0.42);
+  background: #fff7f9;
+}
+
+.globalDropOverlay.unsupported .globalDropOverlayPanel strong {
+  color: #be123c;
+}
+
 .topbar {
   position: relative;
   display: flex;
@@ -472,6 +517,20 @@ button {
 .unifiedInputRow.hasImagePreview:hover,
 .unifiedInputRow.hasImagePreview:focus-within {
   z-index: 4;
+}
+
+.unifiedInputRow.unsupportedInput {
+  border-color: rgba(244, 63, 114, 0.28);
+  background: #fff7f9;
+}
+
+.unifiedInputRow.unsupportedInput > svg,
+.unifiedInputRow.unsupportedInput .unifiedInputText > span {
+  color: #be123c;
+}
+
+.unifiedInputRow.unsupportedInput strong {
+  color: #881337;
 }
 
 .unifiedInputRow > svg {

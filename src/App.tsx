@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   ChevronDown,
   FileText,
@@ -25,6 +25,7 @@ import type {
 const initialRuns: RunRecord[] = [];
 const NEAREST_NEIGHBOR_LIMIT = 10;
 const DEFAULT_SAMPLE_SNIPPET_COUNT = 12;
+type DragOverlayState = "hidden" | "supported" | "unsupported";
 
 type EmbeddingServices = Pick<typeof import("./lib/embeddings"), "buildEmbeddingInputPlan" | "createEmbeddingRun" | "runColor">;
 
@@ -42,6 +43,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   const [composerText, setComposerText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [fileMessage, setFileMessage] = useState("");
+  const [dragOverlayState, setDragOverlayState] = useState<DragOverlayState>("hidden");
   const [imagePreviewUrls, setImagePreviewUrls] = useState<Record<string, string>>({});
   const [inputPlan, setInputPlan] = useState<EmbeddingInputPlan | null>(null);
   const [inputPlanStatus, setInputPlanStatus] = useState<PipelineStatus>({
@@ -87,6 +89,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   const isImageModel = model.task === "image-feature-extraction";
   const isClipTextModel = model.task === "clip-text";
   const effectiveInputType: InputType = activeOutputMode === "tokens" ? "tokens" : isImageModel ? "files" : "text";
+  const activeFiles = useMemo(() => files.filter((file) => isFileCompatibleWithModel(file, model)), [files, model]);
   const isWorking = status.phase === "loading" || status.phase === "embedding" || status.phase === "projecting";
   const isPlanning = inputPlanStatus.phase === "loading";
   const draftInputCount = !isImageModel && draftSnippetText ? 1 : 0;
@@ -94,10 +97,13 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     effectiveInputType === "tokens"
       ? 2
       : isImageModel
-        ? files.length
-        : snippets.filter((snippet) => snippet.text.trim()).length + files.length + draftInputCount;
+        ? activeFiles.length
+        : snippets.filter((snippet) => snippet.text.trim()).length + activeFiles.length + draftInputCount;
   const canRun = !isWorking && !isPlanning && candidateInputCount >= 2 && (!isImageModel || effectiveInputType === "files");
   const inputPlanItemsById = useMemo(() => new Map(inputPlan?.items.map((item) => [item.id, item]) ?? []), [inputPlan]);
+  const canAcceptDroppedFiles = activeOutputMode !== "tokens";
+  const isDragOverlayVisible = dragOverlayState !== "hidden";
+  const dragDepthRef = useRef(0);
 
   useEffect(() => {
     setInputPlan(null);
@@ -166,7 +172,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
               model,
               inputType: effectiveInputType,
               snippets: runSnippets,
-              files,
+              files: activeFiles,
               onStatus: setInputPlanStatus,
             });
 
@@ -178,7 +184,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         inputType: effectiveInputType,
         reduction,
         snippets: runSnippets,
-        files,
+        files: activeFiles,
         inputPlan: preparedInputPlan,
         onStatus: setStatus,
       });
@@ -244,11 +250,11 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     if (next.task === "image-feature-extraction") {
       setComposerText("");
     }
-    const compatibleFiles = files.filter((file) => isFileCompatibleWithModel(file, next));
-    if (compatibleFiles.length !== files.length) {
-      setFiles(compatibleFiles);
-      const rejected = files.length - compatibleFiles.length;
-      setFileMessage(`${rejected} selected ${rejected === 1 ? "file is" : "files are"} incompatible with ${next.label}.`);
+    const unsupportedCount = files.filter((file) => !isFileCompatibleWithModel(file, next)).length;
+    if (unsupportedCount > 0) {
+      setFileMessage(`${unsupportedCount} selected ${unsupportedCount === 1 ? "file is" : "files are"} disabled for ${next.label}.`);
+    } else {
+      setFileMessage("");
     }
   }
 
@@ -274,21 +280,82 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
     }
   }
 
-  function handleInputDragOver(event: DragEvent<HTMLElement>) {
-    const canDrop = Array.from(event.dataTransfer.items).some(
-      (item) => item.kind === "file" && (!item.type || isMimeCompatibleWithModel(item.type, model)),
-    );
-    event.preventDefault();
-    event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
+  function fileDragState(dataTransfer: DataTransfer): DragOverlayState {
+    const fileItems = Array.from(dataTransfer.items).filter((item) => item.kind === "file");
+    if (fileItems.length === 0) return canAcceptDroppedFiles ? "supported" : "unsupported";
+    if (!canAcceptDroppedFiles) return "unsupported";
+
+    const hasUnsupportedFile = fileItems.some((item) => item.type && !isMimeCompatibleWithModel(item.type, model));
+    if (hasUnsupportedFile) return "unsupported";
+    return "supported";
   }
 
-  function handleInputDrop(event: DragEvent<HTMLElement>) {
+  function hasFileDrag(dataTransfer: DataTransfer) {
+    return Array.from(dataTransfer.types).includes("Files");
+  }
+
+  function handleGlobalDragEnter(event: DragEvent<HTMLDivElement>) {
+    if (!hasFileDrag(event.dataTransfer)) return;
+
     event.preventDefault();
-    handleFilesSelected(Array.from(event.dataTransfer.files));
+    dragDepthRef.current += 1;
+    setDragOverlayState(fileDragState(event.dataTransfer));
+  }
+
+  function handleGlobalDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!hasFileDrag(event.dataTransfer)) return;
+
+    const nextState = fileDragState(event.dataTransfer);
+    event.preventDefault();
+    event.dataTransfer.dropEffect = nextState === "supported" ? "copy" : "none";
+    setDragOverlayState(nextState);
+  }
+
+  function handleGlobalDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (!hasFileDrag(event.dataTransfer)) return;
+
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setDragOverlayState("hidden");
+    }
+  }
+
+  function handleGlobalDrop(event: DragEvent<HTMLDivElement>) {
+    if (!hasFileDrag(event.dataTransfer)) return;
+
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setDragOverlayState("hidden");
+
+    if (canAcceptDroppedFiles) {
+      handleFilesSelected(Array.from(event.dataTransfer.files));
+    } else {
+      setFileMessage("File is not supported in token table mode.");
+    }
   }
 
   return (
-    <div className="appShell">
+    <div
+      className="appShell"
+      data-testid="app-shell"
+      onDragEnter={handleGlobalDragEnter}
+      onDragOver={handleGlobalDragOver}
+      onDragLeave={handleGlobalDragLeave}
+      onDrop={handleGlobalDrop}
+    >
+      {isDragOverlayVisible ? (
+        <div
+          className={`globalDropOverlay ${dragOverlayState === "unsupported" ? "unsupported" : ""}`}
+          role="status"
+          aria-live="polite"
+          data-testid="global-drop-overlay"
+        >
+          <div className="globalDropOverlayPanel">
+            <strong>{dragOverlayState === "unsupported" ? "File is not supported" : "Drop files to add them"}</strong>
+            <span>{dragOverlayState === "unsupported" ? supportedFileLabel(model, activeOutputMode) : "Release anywhere in the app."}</span>
+          </div>
+        </div>
+      ) : null}
       <header className="topbar">
         <div className="brand">
           <div className="brandMark" aria-hidden="true">
@@ -387,8 +454,6 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                       addComposerText();
                     }
                   }}
-                  onDragOver={handleInputDragOver}
-                  onDrop={handleInputDrop}
                   placeholder={
                     isImageModel
                       ? "Drag image files here. This model embeds images only."
@@ -429,19 +494,32 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                     const itemId = filePlanItemId(file);
                     const fileKind = classifyFile(file);
                     const isImageFile = fileKind === "image";
+                    const isUnsupportedFile = !isFileCompatibleWithModel(file, model);
                     const FileIcon = isImageFile ? ImageIcon : FileText;
                     const previewUrl = isImageFile ? imagePreviewUrls[itemId] : undefined;
                     return (
-                      <div className={`unifiedInputRow ${previewUrl ? "hasImagePreview" : ""}`} key={itemId} data-testid="input-row">
+                      <div
+                        className={`unifiedInputRow ${previewUrl ? "hasImagePreview" : ""} ${isUnsupportedFile ? "unsupportedInput" : ""}`}
+                        key={itemId}
+                        aria-disabled={isUnsupportedFile}
+                        data-testid="input-row"
+                      >
                         <FileIcon size={16} />
                         <div className="unifiedInputText">
                           <strong title={file.name}>{file.name}</strong>
                           <span>{fileKind === "image" ? "Image" : fileKind === "pdf" ? "PDF" : "File"} · {fileDetailLabel(file)}</span>
-                          <InputItemMetadata
-                            item={inputPlanItemsById.get(itemId)}
-                            status={inputPlanStatus}
-                            isImageModel={isImageModel}
-                          />
+                          {isUnsupportedFile ? (
+                            <div className="inputItemMeta skipped" data-testid="input-item-meta">
+                              <span>Unsupported</span>
+                              <small>Not embedded by {model.label}</small>
+                            </div>
+                          ) : (
+                            <InputItemMetadata
+                              item={inputPlanItemsById.get(itemId)}
+                              status={inputPlanStatus}
+                              isImageModel={isImageModel}
+                            />
+                          )}
                         </div>
                         {previewUrl ? (
                           <div className="imageHoverPreview" data-testid="image-hover-preview" aria-hidden="true">
@@ -903,6 +981,13 @@ function outputLabel(outputMode: OutputMode, task?: typeof MODEL_PRESETS[number]
   if (layer !== null) return `Layer ${layer} · hidden state`;
   if (outputMode === "tokens") return "Token table · embeddings";
   return "Final embedding";
+}
+
+function supportedFileLabel(model: typeof MODEL_PRESETS[number], outputMode: OutputMode) {
+  if (outputMode === "tokens") return "Switch Output away from Token table to add files.";
+  if (model.task === "image-feature-extraction") return "Supported files: images.";
+  if (model.supportsImages) return "Supported files: text, PDF, and images.";
+  return "Supported files: text and PDF.";
 }
 
 function layerFromOutputMode(outputMode: OutputMode) {
