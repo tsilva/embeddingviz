@@ -28,10 +28,17 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 0;
   min-height: 100vh;
+  overflow: hidden;
   background: var(--bg);
 }
 
@@ -48,8 +55,10 @@ button {
 
 .appShell {
   display: grid;
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   grid-template-rows: 56px minmax(0, 1fr);
+  overflow: hidden;
   background: var(--bg);
 }
 
@@ -202,6 +211,7 @@ button {
 
 .leftPanel,
 .rightPanel {
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--panel);
@@ -881,7 +891,10 @@ button {
 }
 
 .plotRegion {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   background: #fff;
   padding: 18px 18px 16px;
@@ -951,8 +964,8 @@ button {
 .plotCanvas {
   position: relative;
   width: 100%;
-  height: calc(100vh - 124px);
-  min-height: 565px;
+  height: 100%;
+  min-height: 0;
   border-radius: 4px;
   background: #fff;
 }
@@ -1508,10 +1521,14 @@ button {
 @media (max-width: 900px) {
   body {
     min-width: 0;
+    overflow: auto;
   }
 
   .appShell {
     display: block;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
   }
 
   .topbar {
@@ -1557,6 +1574,7 @@ button {
   }
 
   .plotRegion {
+    display: block;
     padding: 18px 14px;
   }
 
