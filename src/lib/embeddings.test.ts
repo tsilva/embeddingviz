@@ -182,6 +182,31 @@ describe("embedding internals", () => {
     expect(statuses.at(-1)).toMatch(/\d+ tokens · \d+ chunks/);
   });
 
+  it("rejects malformed PDF input without executing embedded content", async () => {
+    Object.defineProperty(globalThis, "__EMBEDDINGVIZ_PDF_EXECUTED__", {
+      configurable: true,
+      value: false,
+      writable: true,
+    });
+    const maliciousPdf = new File(
+      ["%PDF-1.4\n1 0 obj << /OpenAction << /S /JavaScript /JS (globalThis.__EMBEDDINGVIZ_PDF_EXECUTED__=true) >> >>"],
+      "malformed.pdf",
+      { type: "application/pdf" },
+    );
+
+    await expect(
+      buildEmbeddingInputPlan({
+        model: textModel,
+        inputType: "text",
+        snippets: [],
+        files: [maliciousPdf],
+        onStatus: () => {},
+      }),
+    ).rejects.toThrow();
+    expect((globalThis as typeof globalThis & { __EMBEDDINGVIZ_PDF_EXECUTED__?: boolean }).__EMBEDDINGVIZ_PDF_EXECUTED__).toBe(false);
+    delete (globalThis as typeof globalThis & { __EMBEDDINGVIZ_PDF_EXECUTED__?: boolean }).__EMBEDDINGVIZ_PDF_EXECUTED__;
+  });
+
   it("creates a projected run from planned text samples", async () => {
     const samples: PlannedEmbeddingSample[] = ["alpha", "beta", "gamma"].map((label, index) => ({
       id: `sample-${index}`,
