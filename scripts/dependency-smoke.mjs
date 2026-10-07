@@ -22,13 +22,13 @@ function versionAtLeast(version, floor) {
 
 const floors = new Map([
   ["@babel/core", "7.29.6"],
-  ["adm-zip", "0.6.0"],
+  ["adm-zip", "0.6.1"],
   ["nanoid", "3.3.18"],
   ["pdfjs-dist", "6.2.108"],
   ["postcss", "8.5.23"],
   ["protobufjs", "7.6.5"],
-  ["sharp", "0.35.0"],
-  ["undici", "7.29.0"],
+  ["sharp", "0.35.5"],
+  ["undici", "7.29.1"],
   ["vite", "8.0.16"],
 ]);
 
@@ -54,9 +54,10 @@ for (const dependencies of [packageJson.dependencies, packageJson.devDependencie
   }
 }
 assert.deepEqual(packageJson.overrides, {
+  "source-map-js": "1.2.2",
   "@huggingface/transformers": {
-    "onnxruntime-node": { "adm-zip": "0.6.0" },
-    "sharp": "0.35.3",
+    "onnxruntime-node": { "adm-zip": "0.6.1" },
+    "sharp": "0.35.5",
   },
 });
 
