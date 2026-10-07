@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { MODEL_PRESETS, SAMPLE_SNIPPETS } from "./data";
 import { ScatterPlot } from "./components/ScatterPlot";
+import { embeddingSpaceId, nearestNeighborsForPoint } from "./lib/comparisons";
 import type {
   EmbeddingInputPlan,
   EmbeddingPoint,
@@ -104,6 +105,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   const canAcceptDroppedFiles = activeOutputMode !== "tokens";
   const isDragOverlayVisible = dragOverlayState !== "hidden";
   const dragDepthRef = useRef(0);
+  const projectionController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setInputPlan(null);
@@ -139,6 +141,8 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   }, [files]);
 
   async function handleRun() {
+    const controller = new AbortController();
+    projectionController.current = controller;
     try {
       const runSnippets =
         !isImageModel && draftSnippetText
@@ -187,24 +191,29 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         files: activeFiles,
         inputPlan: preparedInputPlan,
         onStatus: setStatus,
+        signal: controller.signal,
       });
 
       const runIndex = runs.length;
+      const runId = crypto.randomUUID();
       const run: RunRecord = {
-        id: `${Date.now()}`,
+        id: runId,
         name: runName(effectiveInputType),
         model: model.label,
+        spaceId: embeddingSpaceId(model, activeOutputMode),
         output: outputLabel(activeOutputMode, model.task),
-        reduction,
+        reduction: result.points.length < 4 ? "PCA" : reduction,
         color: services.runColor(runIndex),
         count: result.points.length,
         current: true,
         visible: true,
-        points: result.points,
+        points: result.points.map((point) => ({ ...point, id: `${runId}-${point.id}` })),
       };
 
-      setRuns((current) => [run, ...current.map((item) => ({ ...item, current: false }))].slice(0, 4));
-      setSelectedPointId(result.points[0]?.id ?? null);
+      setRuns((current) => [run, ...current.map((item) => ({ ...item, current: false, visible: false }))].slice(0, 4));
+      setSelectedPointId(run.points[0]?.id ?? null);
+      setQuery("");
+      setShowNeighborhood(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Embedding run failed";
       setStatus({
@@ -213,6 +222,8 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         progress: 0,
       });
       setInputPlanStatus((current) => (current.phase === "loading" ? { phase: "error", message, progress: 0 } : current));
+    } finally {
+      projectionController.current = null;
     }
   }
 
@@ -240,7 +251,16 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
   }
 
   function toggleRunVisibility(id: string) {
-    setRuns((current) => current.map((run) => (run.id === id ? { ...run, visible: !run.visible } : run)));
+    setRuns((current) => current.map((run) => ({ ...run, visible: run.id === id })));
+    setSelectedPointId(null);
+    setQuery("");
+    setShowNeighborhood(false);
+  }
+
+  function selectPoint(point: EmbeddingPoint) {
+    setRuns((current) => current.map((run) => ({ ...run, visible: run.points.some((candidate) => candidate.id === point.id) })));
+    setSelectedPointId(point.id);
+    setQuery("");
   }
 
   function handleModelChange(nextModelId: string) {
@@ -367,6 +387,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         </div>
 
         <div className="topbarActions">
+          {status.phase === "projecting" ? <button type="button" onClick={() => projectionController.current?.abort()}>Cancel projection</button> : null}
           <a
             className="githubLink"
             href="https://github.com/tsilva/embeddingviz"
@@ -394,6 +415,11 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         </div>
       </header>
 
+      <div className={`runStatus ${status.phase}`} role={status.phase === "error" ? "alert" : "status"} aria-live={status.phase === "error" ? "assertive" : "polite"}>
+        {status.message}
+        {status.phase === "error" && runs.length > 0 ? " Previous result is still available in the inspector." : ""}
+      </div>
+
       <div className="workspace">
         <aside className="leftPanel">
           <section className="controlSection">
@@ -401,7 +427,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
               Model
             </label>
             <div className="selectShell">
-              <select id="model" value={modelId} onChange={(event) => handleModelChange(event.target.value)}>
+              <select id="model" disabled={isWorking} value={modelId} onChange={(event) => handleModelChange(event.target.value)}>
                 {MODEL_PRESETS.map((preset) => (
                   <option key={preset.id} value={preset.id}>
                     {preset.id}
@@ -421,7 +447,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
               Output
             </label>
             <div className="selectShell">
-              <select id="output" value={activeOutputMode} onChange={(event) => chooseOutputMode(event.target.value as OutputMode)}>
+              <select id="output" disabled={isWorking} value={activeOutputMode} onChange={(event) => chooseOutputMode(event.target.value as OutputMode)}>
                 {model.outputModes.map((mode) => (
                   <option key={mode} value={mode}>
                     {outputLabel(mode, model.task)}
@@ -540,14 +566,16 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
         </aside>
 
         <ScatterPlot
+          key={visibleRuns[0]?.id ?? "empty"}
           runs={runs}
           selectedPointId={selectedPointId}
           query={query}
           is3d={is3d}
           reduction={reduction}
+          isWorking={isWorking}
           neighborhoodPointIds={neighborhoodPointIds}
           onQueryChange={setQuery}
-          onPointSelect={(point: EmbeddingPoint) => setSelectedPointId(point.id)}
+          onPointSelect={selectPoint}
           onReductionChange={setReduction}
           onToggle3d={setIs3d}
         />
@@ -559,6 +587,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
           </div>
 
           <div className="runsList">
+            {runs.length > 0 ? <p className="runComparisonNote">Choose one run to view. Each projection has its own axes.</p> : null}
             {runs.length === 0 ? (
               <div className="emptyRuns">
                 <span>Run comparison appears after projection.</span>
@@ -570,10 +599,11 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                 <div className="runCardBody">
                   <strong>{run.name}</strong>
                   <span>{run.model} · {run.count} points</span>
+                  <span>{run.output} · {run.reduction}</span>
                 </div>
                 <label className="checkbox">
-                  <span className="srOnly">{run.visible ? "Hide" : "Show"} {run.name}</span>
-                  <input type="checkbox" checked={run.visible} onChange={() => toggleRunVisibility(run.id)} />
+                  <span className="srOnly">View {run.model} · {run.output} · {run.reduction}</span>
+                  <input type="radio" name="displayed-run" checked={run.visible} onChange={() => toggleRunVisibility(run.id)} />
                 </label>
               </div>
             ))}
@@ -614,7 +644,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                   <div className="nearestHeader">
                     <div>
                       <h3>Nearest points</h3>
-                      <span>{selectedRun ? `Cosine similarity from ${selectedRun.name}` : "Cosine similarity"}</span>
+                      <span>{selectedRun ? `Cosine similarity · ${selectedRun.model} · matching outputs across saved runs` : "Cosine similarity"}</span>
                     </div>
                     <label className="neighborhoodToggle">
                       <input type="checkbox" checked={showNeighborhood} onChange={(event) => setShowNeighborhood(event.target.checked)} />
@@ -628,7 +658,7 @@ function App({ embeddingServices }: { embeddingServices?: Partial<EmbeddingServi
                         className="nearestRow"
                         type="button"
                         key={neighbor.point.id}
-                        onClick={() => setSelectedPointId(neighbor.point.id)}
+                        onClick={() => selectPoint(neighbor.point)}
                         data-testid="nearest-row"
                       >
                         <span className="nearestRowText">
@@ -913,54 +943,6 @@ function devMockEmbeddingServices(): Partial<EmbeddingServices> {
     },
     runColor: () => "#2563eb",
   };
-}
-
-interface NearestNeighbor {
-  run: RunRecord;
-  point: EmbeddingPoint;
-  distance: number;
-  similarity: number;
-}
-
-function nearestNeighborsForPoint(selectedPoint: EmbeddingPoint, runs: RunRecord[], limit: number): NearestNeighbor[] {
-  return runs
-    .filter((run) => run.visible)
-    .flatMap((run) =>
-      run.points
-        .filter((point) => point.id !== selectedPoint.id)
-        .map((point) => {
-          const similarity = cosineSimilarity(selectedPoint.vector, point.vector);
-          return {
-            run,
-            point,
-            similarity,
-            distance: 1 - similarity,
-          };
-        }),
-    )
-    .filter((neighbor) => Number.isFinite(neighbor.similarity) && Number.isFinite(neighbor.distance))
-    .sort((a, b) => b.similarity - a.similarity || a.distance - b.distance || a.point.label.localeCompare(b.point.label))
-    .slice(0, limit);
-}
-
-function cosineSimilarity(a: ArrayLike<number>, b: ArrayLike<number>) {
-  const length = Math.min(a.length, b.length);
-  if (length === 0) return Number.NEGATIVE_INFINITY;
-
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let index = 0; index < length; index += 1) {
-    const valueA = a[index];
-    const valueB = b[index];
-    dot += valueA * valueB;
-    normA += valueA * valueA;
-    normB += valueB * valueB;
-  }
-
-  if (normA === 0 || normB === 0) return Number.NEGATIVE_INFINITY;
-  const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
-  return Math.min(Math.max(similarity, -1), 1);
 }
 
 function runName(inputType: InputType) {

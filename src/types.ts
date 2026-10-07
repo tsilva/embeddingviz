@@ -32,6 +32,7 @@ export interface RunRecord {
   id: string;
   name: string;
   model: string;
+  spaceId: string;
   output: string;
   reduction: ReductionMethod;
   color: string;
@@ -51,6 +52,8 @@ export interface ModelPreset {
   maxInputTokens: number;
   supportsImages: boolean;
   note: string;
+  dtype?: "q8" | "q4" | "fp32" | "fp16";
+  useExternalData?: boolean;
 }
 
 export interface PipelineStatus {

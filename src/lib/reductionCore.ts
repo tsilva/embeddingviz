@@ -1,4 +1,5 @@
 import type { PipelineStatus, ReductionMethod } from "../types";
+import { validateReductionSize } from "./reductionLimits";
 import { normalizeCoordinates, projectPca, projectPcaMatrix, vectorsToMatrix, type ProjectionResult, type VectorRow } from "./pca";
 
 type StatusReporter = (status: PipelineStatus) => void;
@@ -8,7 +9,9 @@ const TSNE_EARLY_EXAGGERATION_ITERATIONS = 250;
 const TSNE_EARLY_EXAGGERATION = 12;
 const TSNE_EPSILON = 1e-12;
 
-export async function projectReductionCore(vectors: VectorRow[], method: ReductionMethod, onStatus: StatusReporter): Promise<ProjectionResult> {
+export async function projectReductionCore(vectors: VectorRow[], method: ReductionMethod, onStatus: StatusReporter, signal?: AbortSignal): Promise<ProjectionResult> {
+  signal?.throwIfAborted();
+  validateReductionSize(vectors.length, method);
   onStatus({ phase: "projecting", message: `Projecting with ${method}`, progress: 0.82 });
   await yieldToBrowser();
 
@@ -18,13 +21,13 @@ export async function projectReductionCore(vectors: VectorRow[], method: Reducti
 
   const matrix = vectorsToMatrix(vectors);
   if (method === "UMAP") {
-    return projectUmap(matrix, onStatus);
+    return projectUmap(matrix, onStatus, signal);
   }
 
-  return projectTsne(matrix, onStatus);
+  return projectTsne(matrix, onStatus, signal);
 }
 
-async function projectUmap(vectors: number[][], onStatus: StatusReporter): Promise<ProjectionResult> {
+async function projectUmap(vectors: number[][], onStatus: StatusReporter, signal?: AbortSignal): Promise<ProjectionResult> {
   onStatus({ phase: "projecting", message: "Building UMAP neighborhood graph", progress: 0.84 });
   await yieldToBrowser();
 
@@ -39,6 +42,7 @@ async function projectUmap(vectors: number[][], onStatus: StatusReporter): Promi
   });
 
   const embedding = await umap.fitAsync(vectors, (epoch) => {
+    signal?.throwIfAborted();
     if (epoch % 10 === 0) {
       onStatus({ phase: "projecting", message: "Optimizing UMAP layout", progress: Math.min(0.97, 0.86 + epoch / umapEpochs(vectors.length) * 0.11) });
     }
@@ -50,7 +54,7 @@ async function projectUmap(vectors: number[][], onStatus: StatusReporter): Promi
   };
 }
 
-async function projectTsne(vectors: number[][], onStatus: StatusReporter): Promise<ProjectionResult> {
+async function projectTsne(vectors: number[][], onStatus: StatusReporter, signal?: AbortSignal): Promise<ProjectionResult> {
   onStatus({ phase: "projecting", message: "Preparing t-SNE distances", progress: 0.84 });
   await yieldToBrowser();
 
@@ -63,6 +67,7 @@ async function projectTsne(vectors: number[][], onStatus: StatusReporter): Promi
   const learningRate = Math.max(200, vectors.length / 12);
 
   for (let iteration = 0; iteration < iterations; iteration += 1) {
+    signal?.throwIfAborted();
     const exaggeration = iteration < TSNE_EARLY_EXAGGERATION_ITERATIONS ? TSNE_EARLY_EXAGGERATION : 1;
     const momentum = iteration < TSNE_EARLY_EXAGGERATION_ITERATIONS ? 0.5 : 0.8;
     const gradients = tsneGradients(embedding, probabilities, exaggeration);

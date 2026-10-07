@@ -17,6 +17,8 @@ export const MODEL_PRESETS: ModelPreset[] = [
   },
   {
     id: "onnx-community/all-MiniLM-L6-v2-ONNX",
+    dtype: "q4",
+    useExternalData: true,
     label: "all-MiniLM-L6-v2",
     task: "feature-extraction",
     summary: "Text embedding model · ONNX ready",

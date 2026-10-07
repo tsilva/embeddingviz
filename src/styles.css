@@ -57,7 +57,7 @@ button {
   display: grid;
   height: 100dvh;
   min-height: 0;
-  grid-template-rows: 56px minmax(0, 1fr);
+  grid-template-rows: 56px auto minmax(0, 1fr);
   overflow: hidden;
   background: var(--bg);
 }
@@ -1500,26 +1500,6 @@ button {
 
 @media (max-width: 1240px) {
   body {
-    min-width: 1000px;
-  }
-
-  .workspace {
-    grid-template-columns: 310px minmax(520px, 1fr) 300px;
-  }
-
-  .topbarActions {
-    gap: 10px;
-  }
-
-  .plotToolbar {
-    flex-wrap: wrap;
-    height: auto;
-  }
-
-}
-
-@media (max-width: 900px) {
-  body {
     min-width: 0;
     overflow: auto;
   }
@@ -1640,3 +1620,12 @@ button {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.runStatus { padding: 7px 18px; border-bottom: 1px solid var(--border); background: var(--panel-soft); color: var(--muted); font-size: 12px; }
+.runStatus.error { background: #fff1f2; color: #9f1239; }
+.runComparisonNote, .plotCaption { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.plotCaption { padding: 6px 0; }
+.reductionSelector { display: grid; gap: 4px; }
+.toolbarLabel { color: var(--muted); font-size: 11px; }
+.plotToolbar { height: auto; min-height: 54px; flex-wrap: wrap; }
+.plotRegion { grid-template-rows: auto auto minmax(0, 1fr); }

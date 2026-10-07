@@ -231,18 +231,21 @@ test("run includes text still sitting in the composer", async ({ page }) => {
   await expect(page.getByTestId("input-row").filter({ hasText: "delta draft input" }).locator("strong")).toHaveText("delta draft input");
 });
 
-test("hiding the only run clears hidden selected point details", async ({ page }) => {
+test("selecting a saved run displays only that projection", async ({ page }) => {
   await page.goto("/?mockEmbeddings=1");
-
   await replaceInputs(page, ["alpha forest", "beta weather", "gamma cliffs"]);
   await page.getByTestId("run-projection").click();
   await expect(page.getByTestId("selected-point-label")).toHaveText("alpha forest");
-
-  await page.locator(".runCard input[type='checkbox']").uncheck();
-
-  await expect(page.getByText("No visible points. Turn a run back on to show embeddings.")).toBeVisible();
-  await expect(page.getByText("No point selected.")).toBeVisible();
-  await expect(page.getByTestId("selected-point-label")).toHaveCount(0);
+  await page.getByLabel("Model").selectOption("Xenova/clip-vit-base-patch32");
+  await page.getByTestId("run-projection").click();
+  await expect(page.locator(".runCard")).toHaveCount(2);
+  const radios = page.locator(".runCard input[type='radio']");
+  await expect(radios.nth(0)).toBeChecked();
+  await expect(radios.nth(1)).not.toBeChecked();
+  await radios.nth(1).check();
+  await expect(radios.nth(0)).not.toBeChecked();
+  await expect(radios.nth(1)).toBeChecked();
+  await expect(page.locator(".plotCaption")).toContainText("paraphrase-MiniLM-L3-v2");
 });
 
 test("narrow viewports do not force desktop horizontal scrolling", async ({ page }) => {
@@ -341,7 +344,7 @@ test("ambient labels stay suppressed and search labels stay inside the visible c
   }
 });
 
-test("nearest point results are ordered by similarity across visible runs", async ({ page }) => {
+test("nearest point results are ordered by similarity across compatible saved runs", async ({ page }) => {
   await page.addInitScript(() => {
     let runIndex = 0;
     const fixtures = [

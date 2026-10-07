@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, ZoomIn, ZoomOut, RotateCcw, Box } from "lucide-react";
 import type { EmbeddingPoint, ReductionMethod, RunRecord } from "../types";
+import { INITIAL_CAMERA, rotatePoint, type CameraAngles } from "../lib/camera";
 
 interface ScatterPlotProps {
   runs: RunRecord[];
@@ -8,6 +9,7 @@ interface ScatterPlotProps {
   query: string;
   is3d: boolean;
   reduction: ReductionMethod;
+  isWorking: boolean;
   neighborhoodPointIds: Set<string> | null;
   onQueryChange: (query: string) => void;
   onPointSelect: (point: EmbeddingPoint) => void;
@@ -48,13 +50,15 @@ const PLOT_LABEL_MAX_CHARS = 32;
 const PLOT_LABEL_EDGE_GUTTER = 14;
 const SEARCH_LABEL_LIMIT = 8;
 const REDUCTION_METHODS: ReductionMethod[] = ["PCA", "UMAP", "t-SNE"];
+const webGlPrograms = new WeakMap<WebGLRenderingContext, NonNullable<ReturnType<typeof createProgram>>>();
 
 export function ScatterPlot({
   runs,
   selectedPointId,
   query,
-  is3d,
+  is3d: requested3d,
   reduction,
+  isWorking,
   neighborhoodPointIds,
   onQueryChange,
   onPointSelect,
@@ -62,15 +66,18 @@ export function ScatterPlot({
   onToggle3d,
 }: ScatterPlotProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const dragRef = useRef<{ startX: number; startY: number; startView: ViewState; moved: boolean } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; startView: ViewState; startCamera: CameraAngles; moved: boolean } | null>(null);
   const primaryButtonDownRef = useRef(false);
   const [view, setView] = useState<ViewState>(INITIAL_VIEW);
+  const [camera, setCamera] = useState<CameraAngles>(INITIAL_CAMERA);
   const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
   const points = useMemo<PlotPoint[]>(
     () => runs.filter((run) => run.visible).flatMap((run) => run.points.map((point) => ({ point, color: run.color }))),
     [runs],
   );
   const hasPoints = points.length > 0;
+  const displayedRun = runs.find((run) => run.visible);
+  const is3d = requested3d && displayedRun?.reduction !== "t-SNE";
   const selected = points.find(({ point }) => point.id === selectedPointId) ?? points[0];
   const filtered = useMemo(() => {
     const normalizedQuery = query.toLowerCase();
@@ -84,18 +91,19 @@ export function ScatterPlot({
   const projected = useMemo(
     () =>
       filtered.map(({ point, color }) => {
-        const depthOffset = is3d ? point.z * 9 : 0;
-        const baseX = mapX(point.x) + depthOffset;
-        const baseY = mapY(point.y) - depthOffset * 0.35;
+        const rotated = is3d ? rotatePoint(point.x, point.y, point.z, camera) : { x: point.x, y: point.y, depth: 0 };
+        const baseX = mapX(rotated.x);
+        const baseY = mapY(rotated.y);
         const transformed = applyView(baseX, baseY, view);
         return {
           point,
           color,
           cx: transformed.x,
           cy: transformed.y,
+          depth: rotated.depth,
         };
-      }),
-    [filtered, is3d, view],
+      }).sort((a, b) => a.depth - b.depth),
+    [camera, filtered, is3d, view],
   );
 
   const selectedProjected = useMemo(() => {
@@ -139,6 +147,7 @@ export function ScatterPlot({
 
   function handleResetView() {
     setView(INITIAL_VIEW);
+    setCamera(INITIAL_CAMERA);
   }
 
   function handleCanvasWheel(event: React.WheelEvent<HTMLCanvasElement>) {
@@ -155,7 +164,7 @@ export function ScatterPlot({
 
     primaryButtonDownRef.current = true;
     const { x, y } = canvasPoint(event);
-    dragRef.current = { startX: x, startY: y, startView: view, moved: false };
+    dragRef.current = { startX: x, startY: y, startView: view, startCamera: camera, moved: false };
   }
 
   function handleCanvasMouseMove(event: React.MouseEvent<HTMLCanvasElement>) {
@@ -168,11 +177,11 @@ export function ScatterPlot({
         drag.moved = true;
         setHoveredPointId(null);
       }
-      setView({
-        ...drag.startView,
-        offsetX: drag.startView.offsetX + dx,
-        offsetY: drag.startView.offsetY + dy,
-      });
+      if (is3d) {
+        setCamera({ yaw: drag.startCamera.yaw + dx * 0.01, pitch: clamp(drag.startCamera.pitch + dy * 0.01, -Math.PI / 2, Math.PI / 2) });
+      } else {
+        setView({ ...drag.startView, offsetX: drag.startView.offsetX + dx, offsetY: drag.startView.offsetY + dy });
+      }
       return;
     }
 
@@ -217,11 +226,15 @@ export function ScatterPlot({
           />
         </label>
 
-        <div className="segmented projectionMethods" aria-label="Reduction method">
+        <div className="reductionSelector">
+        <span className="toolbarLabel">Next run reduction</span>
+        <div className="segmented projectionMethods" aria-label="Next run reduction">
           {REDUCTION_METHODS.map((method) => (
             <button
               key={method}
               className={reduction === method ? "active" : ""}
+              aria-pressed={reduction === method}
+              disabled={isWorking}
               type="button"
               onClick={() => onReductionChange(method)}
               title={`Project with ${method}`}
@@ -230,6 +243,7 @@ export function ScatterPlot({
               {method}
             </button>
           ))}
+        </div>
         </div>
 
         <div className="iconGroup" aria-label="Plot controls">
@@ -245,15 +259,19 @@ export function ScatterPlot({
         </div>
 
         <div className="segmented small" aria-label="Projection dimension">
-          <button className={!is3d ? "active" : ""} type="button" onClick={() => onToggle3d(false)} disabled={!hasPoints}>
+          <button className={!is3d ? "active" : ""} aria-pressed={!is3d} type="button" onClick={() => onToggle3d(false)} disabled={!hasPoints}>
             2D
           </button>
-          <button className={is3d ? "active" : ""} type="button" onClick={() => onToggle3d(true)} disabled={!hasPoints}>
+          <button className={is3d ? "active" : ""} aria-pressed={is3d} title={displayedRun?.reduction === "t-SNE" ? "t-SNE produces a 2D projection" : "Rotate a 3D projection"} type="button" onClick={() => onToggle3d(true)} disabled={!hasPoints || displayedRun?.reduction === "t-SNE"}>
             3D
           </button>
         </div>
 
       </div>
+
+      <p className="plotCaption" role="status">
+        {displayedRun ? `${displayedRun.model} · ${displayedRun.output} · ${displayedRun.reduction} · ${is3d ? "3D — drag to rotate" : "2D — drag to pan"}` : "Choose a reduction for the next run."}
+      </p>
 
       <div className="plotCanvas">
         <canvas
@@ -261,7 +279,7 @@ export function ScatterPlot({
           className="pointCloudCanvas"
           width={WIDTH}
           height={HEIGHT}
-          aria-label="2D embedding point cloud"
+          aria-label={`${is3d ? "3D" : "2D"} embedding point cloud`}
           data-testid="point-cloud-canvas"
           onWheel={handleCanvasWheel}
           onMouseDown={handleCanvasMouseDown}
@@ -275,8 +293,9 @@ export function ScatterPlot({
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           preserveAspectRatio="none"
           role="img"
-          aria-label="2D embedding scatter plot"
+          aria-label={`${is3d ? "3D" : "2D"} embedding scatter plot`}
         >
+          {!is3d ? <>
           {axisTicks.x.map(({ value, position }) => (
             <g key={`x-${value}`}>
               <line className="gridLine" x1={position} x2={position} y1={PADDING} y2={HEIGHT - PADDING} />
@@ -303,6 +322,14 @@ export function ScatterPlot({
           <text className="axisLabel" transform={`translate(14 ${HEIGHT / 2}) rotate(-90)`} textAnchor="middle">
             Axis 2
           </text>
+          </> : ["Axis 1", "Axis 2", "Axis 3"].map((label, index) => {
+            const axis = [0, 0, 0];
+            axis[index] = 5;
+            const rotated = rotatePoint(axis[0], axis[1], axis[2], camera);
+            const end = applyView(mapX(rotated.x), mapY(rotated.y), view);
+            const center = applyView(mapX(0), mapY(0), view);
+            return <g key={label}><line className="axisLine" x1={center.x} y1={center.y} x2={end.x} y2={end.y} /><text className="axisLabel" x={end.x} y={end.y - 10} textAnchor="middle">{label}</text></g>;
+          })}
 
           {searchLabels.map((item) => (
             <PlotPointLabel key={item.point.id} projected={item} />
@@ -384,11 +411,12 @@ function renderWebGlPoints(
     return;
   }
 
-  const program = createProgram(gl);
+  const program = webGlPrograms.get(gl) ?? createProgram(gl);
   if (!program) {
     renderCanvasPoints(canvas, points, selectedPointId, neighborhoodPointIds);
     return;
   }
+  webGlPrograms.set(gl, program);
 
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(0, 0, 0, 0);
@@ -466,15 +494,26 @@ function createProgram(gl: WebGLRenderingContext) {
     `,
   );
 
-  if (!vertexShader || !fragmentShader) return null;
+  if (!vertexShader || !fragmentShader) {
+    if (vertexShader) gl.deleteShader(vertexShader);
+    if (fragmentShader) gl.deleteShader(fragmentShader);
+    return null;
+  }
 
   const program = gl.createProgram();
-  if (!program) return null;
+  if (!program) {
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    return null;
+  }
   gl.attachShader(program, vertexShader);
   gl.attachShader(program, fragmentShader);
   gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
 
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    gl.deleteProgram(program);
     return null;
   }
 
@@ -491,7 +530,9 @@ function compileShader(gl: WebGLRenderingContext, type: number, source: string) 
   if (!shader) return null;
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
-  return gl.getShaderParameter(shader, gl.COMPILE_STATUS) ? shader : null;
+  if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return shader;
+  gl.deleteShader(shader);
+  return null;
 }
 
 function renderCanvasPoints(

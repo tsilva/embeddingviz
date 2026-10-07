@@ -3,6 +3,7 @@ import { MODEL_PRESETS } from "../data";
 import type { ModelPreset, PlannedEmbeddingSample } from "../types";
 import { __testing, buildEmbeddingInputPlan, createEmbeddingRun } from "./embeddings";
 import { projectReduction } from "./reductions";
+import { pipeline } from "@huggingface/transformers";
 
 vi.mock("@huggingface/transformers", () => ({
   env: {},
@@ -100,6 +101,18 @@ const clipModel: ModelPreset = {
 describe("embedding internals", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("loads the L6 preset with its published q4 external data and retries a failed download", async () => {
+    const model = MODEL_PRESETS[1];
+    const snippets = ["alpha", "beta", "gamma"].map((text, index) => ({ id: `retry-${index}`, text }));
+    const inputPlan = await buildEmbeddingInputPlan({ model, inputType: "text", snippets, files: [], onStatus: () => {} });
+    const request = { model, inputType: "text" as const, outputMode: "final" as const, reduction: "PCA" as const, snippets, files: [], inputPlan, onStatus: () => {} };
+    vi.mocked(pipeline).mockRejectedValueOnce(new Error("Temporary model download failure"));
+    await expect(createEmbeddingRun(request)).rejects.toThrow("Temporary model download failure");
+    await expect(createEmbeddingRun(request)).resolves.toHaveProperty("points");
+    expect(pipeline).toHaveBeenCalledTimes(2);
+    expect(pipeline).toHaveBeenLastCalledWith("feature-extraction", model.id, expect.objectContaining({ dtype: "q4", use_external_data_format: true }));
   });
 
   it("chunks token ids with bounded overlap and complete coverage", () => {
@@ -252,6 +265,7 @@ describe("embedding internals", () => {
       ],
       "PCA",
       expect.any(Function),
+      undefined,
     );
     expect(result.explained).toEqual([0.7, 0.2, 0.1]);
     expect(result.points.map((point) => [point.label, point.x, point.y])).toEqual([
@@ -285,6 +299,7 @@ describe("embedding internals", () => {
       ],
       "PCA",
       expect.any(Function),
+      undefined,
     );
   });
 });

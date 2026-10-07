@@ -14,10 +14,14 @@ Use it to compare small embedding runs, inspect selected points, switch between 
 
 ## Install
 
+Use Node.js 22.13+ (or Node.js 24+) and npm 11.20.0, pinned in `package.json`.
+Install that npm version before cloning:
+
 ```bash
+npm install --global npm@11.20.0
 git clone https://github.com/tsilva/embeddingviz.git
 cd embeddingviz
-npm install
+npm ci
 npm run dev
 ```
 
@@ -45,4 +49,4 @@ npm run preview  # preview the production build locally
 
 ## License
 
-No license file is currently included.
+Licensed under the [MIT License](./LICENSE).

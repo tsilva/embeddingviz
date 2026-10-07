@@ -1,5 +1,6 @@
 import type { ProgressInfo } from "@huggingface/transformers";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+import { validateReductionSize } from "./reductionLimits";
 import type {
   EmbeddingInputPlan,
   EmbeddingPoint,
@@ -75,6 +76,16 @@ const tokenizerCache = new Map<string, Promise<Tokenizer>>();
 let transformersPromise: Promise<TransformersModule> | null = null;
 let pdfJsPromise: Promise<PdfJsModule> | null = null;
 
+async function resolveCached<T>(cache: Map<string, Promise<T>>, key: string) {
+  const promise = cache.get(key)!;
+  try {
+    return await promise;
+  } catch (error) {
+    if (cache.get(key) === promise) cache.delete(key);
+    throw error;
+  }
+}
+
 async function loadTransformers() {
   if (!transformersPromise) {
     transformersPromise = import("@huggingface/transformers").then((transformers) => {
@@ -114,6 +125,7 @@ export async function createEmbeddingRun({
   files,
   inputPlan,
   onStatus,
+  signal,
 }: {
   model: ModelPreset;
   outputMode: OutputMode;
@@ -123,6 +135,7 @@ export async function createEmbeddingRun({
   files: File[];
   inputPlan?: EmbeddingInputPlan | null;
   onStatus: (status: PipelineStatus) => void;
+  signal?: AbortSignal;
 }) {
   validateCompatibility(model, inputType, outputMode);
   validateFiles(model, inputType, files);
@@ -136,12 +149,13 @@ export async function createEmbeddingRun({
   if (samples.length < 2) {
     throw new Error("Add at least two inputs before running a projection.");
   }
+  validateReductionSize(samples.length, reduction);
 
   onStatus({ phase: "embedding", message: "Extracting embeddings", progress: 0.55 });
   const vectors = await extractVectors(model, samples, inputType, outputMode, onStatus);
 
   const { projectReduction } = await import("./reductions");
-  const projection = await projectReduction(vectors, reduction, onStatus);
+  const projection = await projectReduction(vectors, reduction, onStatus, signal);
 
   const points: EmbeddingPoint[] = samples.map((sample, index) => ({
     id: `${Date.now()}-${index}`,
@@ -166,7 +180,7 @@ export async function createEmbeddingRun({
 
   onStatus({
     phase: "ready",
-    message: `Model loaded · ${points.length} embeddings · ${reduction} projected`,
+    message: `Model loaded · ${points.length} embeddings · ${points.length < 4 ? "PCA" : reduction} projected${points.length < 4 && reduction !== "PCA" ? ` (${reduction} needs at least four points)` : ""}`,
     progress: 1,
   });
 
@@ -176,13 +190,15 @@ export async function createEmbeddingRun({
   };
 }
 
-async function getExtractor(modelId: string, onStatus: (status: PipelineStatus) => void) {
+async function getExtractor(model: ModelPreset, onStatus: (status: PipelineStatus) => void) {
+  const modelId = model.id;
   if (!extractorCache.has(modelId)) {
     extractorCache.set(
       modelId,
       loadTransformers().then(({ pipeline }) =>
         pipeline("feature-extraction", modelId, {
-          dtype: "q8",
+          dtype: model.dtype ?? "q8",
+          use_external_data_format: model.useExternalData ?? false,
           progress_callback: (progress: ProgressInfo) => {
             if ("progress" in progress && typeof progress.progress === "number") {
               const file = "file" in progress && typeof progress.file === "string" ? progress.file : "";
@@ -198,7 +214,7 @@ async function getExtractor(modelId: string, onStatus: (status: PipelineStatus) 
     );
   }
 
-  return extractorCache.get(modelId)!;
+  return resolveCached(extractorCache, modelId);
 }
 
 async function getImageExtractor(modelId: string, onStatus: (status: PipelineStatus) => void) {
@@ -214,7 +230,7 @@ async function getImageExtractor(modelId: string, onStatus: (status: PipelineSta
     );
   }
 
-  return imageExtractorCache.get(modelId)!;
+  return resolveCached(imageExtractorCache, modelId);
 }
 
 async function getTokenizer(modelId: string, onStatus: (status: PipelineStatus) => void) {
@@ -230,7 +246,7 @@ async function getTokenizer(modelId: string, onStatus: (status: PipelineStatus) 
     );
   }
 
-  return tokenizerCache.get(modelId)!;
+  return resolveCached(tokenizerCache, modelId);
 }
 
 async function getCausalLm(modelId: string, onStatus: (status: PipelineStatus) => void) {
@@ -251,7 +267,7 @@ async function getCausalLm(modelId: string, onStatus: (status: PipelineStatus) =
     );
   }
 
-  return causalLmCache.get(modelId)!;
+  return resolveCached(causalLmCache, modelId);
 }
 
 async function getClipTextModel(modelId: string, onStatus: (status: PipelineStatus) => void) {
@@ -272,7 +288,7 @@ async function getClipTextModel(modelId: string, onStatus: (status: PipelineStat
     );
   }
 
-  return clipTextCache.get(modelId)!;
+  return resolveCached(clipTextCache, modelId);
 }
 
 async function getClipVisionModel(modelId: string, onStatus: (status: PipelineStatus) => void) {
@@ -293,7 +309,7 @@ async function getClipVisionModel(modelId: string, onStatus: (status: PipelineSt
     );
   }
 
-  return clipVisionCache.get(modelId)!;
+  return resolveCached(clipVisionCache, modelId);
 }
 
 export async function buildEmbeddingInputPlan({
@@ -516,7 +532,7 @@ export async function extractVectorsCore(
     return normalizeRows(tensorRows(output.tolist()));
   }
 
-  const extractor = await getExtractor(model.id, onStatus);
+  const extractor = await getExtractor(model, onStatus);
 
   if (outputMode === "tokens") {
     const output = await extractor(samples.map((sample) => sample.text), { pooling: "mean", normalize: true });

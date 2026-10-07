@@ -1,4 +1,5 @@
 import type { PipelineStatus, ReductionMethod } from "../types";
+import { validateReductionSize } from "./reductionLimits";
 import { projectReductionCore } from "./reductionCore";
 import type { ProjectionResult, VectorRow } from "./pca";
 
@@ -25,25 +26,33 @@ interface ReductionWorkerError {
 
 type ReductionWorkerMessage = ReductionWorkerResult | ReductionWorkerStatus | ReductionWorkerError;
 
-export async function projectReduction(vectors: VectorRow[], method: ReductionMethod, onStatus: StatusReporter): Promise<ProjectionResult> {
+export async function projectReduction(vectors: VectorRow[], method: ReductionMethod, onStatus: StatusReporter, signal?: AbortSignal): Promise<ProjectionResult> {
+  signal?.throwIfAborted();
+  validateReductionSize(vectors.length, method);
   if (typeof Worker === "undefined" || vectors.length === 0) {
-    return projectReductionCore(vectors, method, onStatus);
+    return projectReductionCore(vectors, method, onStatus, signal);
   }
 
-  try {
-    return await projectReductionInWorker(vectors, method, onStatus);
-  } catch (error) {
-    console.warn("Projection worker failed, falling back to main thread projection.", error);
-    return projectReductionCore(vectors, method, onStatus);
-  }
+  // Failed jobs must not be repeated on the UI thread (especially memory failures).
+  return projectReductionInWorker(vectors, method, onStatus, signal);
 }
 
-async function projectReductionInWorker(vectors: VectorRow[], method: ReductionMethod, onStatus: StatusReporter) {
+async function projectReductionInWorker(vectors: VectorRow[], method: ReductionMethod, onStatus: StatusReporter, signal?: AbortSignal) {
   const { data, rows, dimensions } = packVectors(vectors);
   const id = crypto.randomUUID();
   const worker = await createReductionWorker();
 
   return new Promise<ProjectionResult>((resolve, reject) => {
+    function cleanup() {
+      worker.terminate();
+      signal?.removeEventListener("abort", cancel);
+    }
+    function cancel() {
+      cleanup();
+      reject(new Error("Projection cancelled."));
+    }
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) { cancel(); return; }
     worker.onmessage = (event: MessageEvent<ReductionWorkerMessage>) => {
       const message = event.data;
       if (message.id !== id) return;
@@ -53,7 +62,7 @@ async function projectReductionInWorker(vectors: VectorRow[], method: ReductionM
         return;
       }
 
-      worker.terminate();
+      cleanup();
       if (message.type === "error") {
         reject(new Error(message.message));
         return;
@@ -66,7 +75,7 @@ async function projectReductionInWorker(vectors: VectorRow[], method: ReductionM
     };
 
     worker.onerror = (event) => {
-      worker.terminate();
+      cleanup();
       reject(new Error(event.message || "Projection worker failed"));
     };
 
