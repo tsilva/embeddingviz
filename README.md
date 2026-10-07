@@ -1,8 +1,12 @@
-<div align="center">
+<p align="center">
   <img src="./logo.png" alt="EmbeddingViz" width="420" />
+  <br />
+  <!-- repo-tagline:start -->
+  <strong>🔎 Explore embedding spaces in your browser 🧭</strong>
+  <!-- repo-tagline:end -->
+</p>
 
-  **Explore embedding spaces in your browser.**
-</div>
+**Explore embedding spaces in your browser.**
 
 EmbeddingViz is a browser-based React app for exploring how embedding models place text, files, tokens, and model outputs in vector space. It runs local UI state, model execution, dimensionality reduction, and plotting in the user's browser.
 
