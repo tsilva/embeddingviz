@@ -50,3 +50,5 @@ npm run preview  # preview the production build locally
 ## License
 
 Licensed under the [MIT License](./LICENSE).
+
+Production delivery keeps Vercel secret isolation enabled and distinguishes public configuration from private credentials; see [production delivery](docs/production-delivery.md).
