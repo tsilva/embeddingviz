@@ -28,8 +28,10 @@ const floors = new Map([
   ["postcss", "8.5.23"],
   ["protobufjs", "7.6.5"],
   ["sharp", "0.35.5"],
-  ["undici", "7.29.1"],
-  ["vite", "8.0.16"],
+  ["undici", "7.30.1"],
+  ["vite", "8.3.3"],
+  ["vitest", "4.1.12"],
+  ["@vitest/mocker", "4.1.12"],
 ]);
 
 for (const [path, dependency] of Object.entries(packageLock.packages)) {
