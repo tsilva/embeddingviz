@@ -35,6 +35,8 @@ npm run build    # type-check and build the production bundle
 npm run preview  # preview the production build locally
 ```
 
+Hosted Vercel builds upload Sentry source maps when configured. Local and GitHub Actions builds skip uploads. Runtime error reporting uses the configured DSN.
+
 ## Notes
 
 - Models are loaded in the browser through `@huggingface/transformers`; remote Hugging Face model files are allowed and browser cache is enabled.
