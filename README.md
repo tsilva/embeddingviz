@@ -39,6 +39,8 @@ Hosted Vercel builds upload Sentry source maps when configured. Local and GitHub
 
 ## Notes
 
+The public homepage at [https://embeddingviz.tsilva.eu/](https://embeddingviz.tsilva.eu/) is the canonical URL listed in `/sitemap.xml`.
+
 - Models are loaded in the browser through `@huggingface/transformers`; remote Hugging Face model files are allowed and browser cache is enabled.
 - There is no backend service or persistent app storage. Run history, selected points, and visibility toggles live in React state.
 - Model embedding extraction and projection use Web Workers when available, with a main-thread fallback for non-image extraction.
