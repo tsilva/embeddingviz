@@ -31,7 +31,7 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173), or the URL printed by Vite 
 
 ```bash
 npm run dev      # start the Vite dev server on 127.0.0.1
-npm run build    # type-check and build the production bundle
+npm run build    # type-check, bundle, and prerender the homepage
 npm run preview  # preview the production build locally
 ```
 

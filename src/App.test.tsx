@@ -1,5 +1,6 @@
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { buildEmbeddingInputPlan, createEmbeddingRun } from "./lib/embeddings";
@@ -46,6 +47,23 @@ afterEach(async () => {
 });
 
 describe("run workflow", () => {
+  it("reuses the prerendered markup and runs a projection after hydration", async () => {
+    await act(async () => { root.unmount(); });
+    container.innerHTML = renderToString(<App />);
+    const button = container.querySelector('[data-testid="run-projection"]');
+    expect(button).not.toBeNull();
+    const onRecoverableError = vi.fn();
+
+    await act(async () => {
+      root = hydrateRoot(container, <App />, { onRecoverableError });
+    });
+
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="run-projection"]')).toBe(button);
+    await click('[data-testid="run-projection"]');
+    expect(createEmbeddingRun).toHaveBeenCalledTimes(1);
+  });
+
   it("initializes the canvas only when points exist and clears a filtered plot", async () => {
     const getContext = vi.mocked(HTMLCanvasElement.prototype.getContext);
     expect(getContext).not.toHaveBeenCalled();

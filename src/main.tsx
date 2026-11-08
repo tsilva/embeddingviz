@@ -1,17 +1,25 @@
 import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import { Analytics } from "@vercel/analytics/react";
 import App from "./App";
 import { Sentry } from "./sentry";
 import "./styles.css";
 
-createRoot(document.getElementById("root")!, {
+const root = document.getElementById("root")!;
+const options = {
   onCaughtError: Sentry.reactErrorHandler(),
   onRecoverableError: Sentry.reactErrorHandler(),
   onUncaughtError: Sentry.reactErrorHandler(),
-}).render(
+};
+const app = (
   <StrictMode>
     <App />
     <Analytics />
-  </StrictMode>,
+  </StrictMode>
 );
+
+if (root.hasChildNodes()) {
+  hydrateRoot(root, app, options);
+} else {
+  createRoot(root, options).render(app);
+}
