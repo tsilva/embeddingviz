@@ -46,6 +46,39 @@ afterEach(async () => {
 });
 
 describe("run workflow", () => {
+  it("initializes the canvas only when points exist and clears a filtered plot", async () => {
+    const getContext = vi.mocked(HTMLCanvasElement.prototype.getContext);
+    expect(getContext).not.toHaveBeenCalled();
+
+    const context = {
+      clearRect: vi.fn(),
+      beginPath: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    getContext.mockImplementation((type) =>
+      type === "2d" ? context as unknown as CanvasRenderingContext2D : null,
+    );
+
+    await click('[data-testid="run-projection"]');
+    expect(getContext).toHaveBeenCalledWith("webgl", { antialias: true });
+    expect(context.arc).toHaveBeenCalled();
+    context.clearRect.mockClear();
+    context.arc.mockClear();
+
+    const search = container.querySelector<HTMLInputElement>('[aria-label="Search points"]')!;
+    const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setInputValue.call(search, "no matching point");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(container.querySelector(".emptyPlot")?.textContent).toContain("No points match");
+    expect(context.clearRect).toHaveBeenCalledTimes(1);
+    expect(context.arc).not.toHaveBeenCalled();
+  });
+
   it("shows inference errors after a successful plan and recovers on retry", async () => {
     vi.mocked(createEmbeddingRun).mockRejectedValueOnce(new Error("Model download failed"));
     await click('[data-testid="run-projection"]');
