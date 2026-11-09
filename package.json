@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
-    "@sentry/react": "^10.51.0",
+    "@sentry/react": "^11.9.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vercel/analytics": "^1.6.1",
