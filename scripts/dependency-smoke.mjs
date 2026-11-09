@@ -44,6 +44,13 @@ for (const [path, dependency] of Object.entries(packageLock.packages)) {
     const floor = major === 1 ? "1.1.18" : "5.0.9";
     assert.ok(versionAtLeast(dependency.version, floor), `${name}@${dependency.version} is below ${floor}`);
   }
+  const major = numericVersion(dependency.version)[0];
+  if (name === "glob" && major >= 9) {
+    assert.ok(versionAtLeast(dependency.version, "14.0.2"), `${name}@${dependency.version} is vulnerable`);
+  }
+  if (name === "minimatch" && major >= 7) {
+    assert.ok(versionAtLeast(dependency.version, "11.0.1"), `${name}@${dependency.version} is vulnerable`);
+  }
   const floor = floors.get(name);
   if (floor) {
     assert.ok(versionAtLeast(dependency.version, floor), `${name}@${dependency.version} is below ${floor}`);
@@ -57,6 +64,8 @@ for (const dependencies of [packageJson.dependencies, packageJson.devDependencie
 }
 assert.deepEqual(packageJson.overrides, {
   "source-map-js": "1.2.2",
+  "minimatch@>=7 <11.0.1": "11.0.1",
+  "glob@>=9 <14.0.2": "14.0.2",
   "@huggingface/transformers": {
     "onnxruntime-node": { "adm-zip": "0.6.1" },
     "sharp": "0.35.5",
