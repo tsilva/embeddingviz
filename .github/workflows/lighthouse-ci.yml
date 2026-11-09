@@ -1,0 +1,19 @@
+name: Lighthouse CI
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: lighthouse-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    uses: tsilva/.github/.github/workflows/lighthouse-ci.yml@cc4063539653becaf4493e6ece6c95784e3d6c81
+    with:
+      url: "https://embeddingviz.tsilva.eu/"
+      sample_timings: true

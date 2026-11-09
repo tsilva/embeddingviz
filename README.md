@@ -31,11 +31,15 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173), or the URL printed by Vite 
 
 ```bash
 npm run dev      # start the Vite dev server on 127.0.0.1
-npm run build    # type-check and build the production bundle
+npm run build    # type-check, bundle, and prerender the homepage
 npm run preview  # preview the production build locally
 ```
 
+Hosted Vercel builds upload Sentry source maps when configured. Local and GitHub Actions builds skip uploads. Runtime error reporting uses the configured DSN.
+
 ## Notes
+
+The public homepage at [https://embeddingviz.tsilva.eu/](https://embeddingviz.tsilva.eu/) is the canonical URL listed in `/sitemap.xml`.
 
 - Models are loaded in the browser through `@huggingface/transformers`; remote Hugging Face model files are allowed and browser cache is enabled.
 - There is no backend service or persistent app storage. Run history, selected points, and visibility toggles live in React state.

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev-server.mjs vite --host 127.0.0.1",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/prerender.mjs",
     "preview": "node scripts/dev-server.mjs vite preview --host 127.0.0.1",
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
@@ -34,7 +34,7 @@
     "@eslint/js": "9.39.1",
     "@playwright/test": "^1.59.1",
     "@sentry/vite-plugin": "^5.2.1",
-    "eslint": "9.39.1",
+    "eslint": "10.14.0",
     "globals": "16.4.0",
     "jsdom": "^29.1.1",
     "typescript-eslint": "8.66.0",
@@ -47,7 +47,9 @@
       },
       "sharp": "0.35.5"
     },
-    "source-map-js": "1.2.2"
+    "source-map-js": "1.2.2",
+    "minimatch@>=7 <11.0.1": "11.0.1",
+    "glob@>=9 <14.0.2": "14.0.2"
   },
   "packageManager": "npm@11.20.0"
 }

@@ -66,6 +66,7 @@ export function ScatterPlot({
   onToggle3d,
 }: ScatterPlotProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hasDrawnPoints = useRef(false);
   const dragRef = useRef<{ startX: number; startY: number; startView: ViewState; startCamera: CameraAngles; moved: boolean } | null>(null);
   const primaryButtonDownRef = useRef(false);
   const [view, setView] = useState<ViewState>(INITIAL_VIEW);
@@ -133,8 +134,10 @@ export function ScatterPlot({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    // An unused canvas is already clear. An existing plot still needs an empty redraw.
+    if (!canvas || (projected.length === 0 && !hasDrawnPoints.current)) return;
     renderWebGlPoints(canvas, projected, selected?.point.id ?? null, neighborhoodPointIds);
+    hasDrawnPoints.current = projected.length > 0;
   }, [neighborhoodPointIds, projected, selected?.point.id]);
 
   function handleZoomIn() {

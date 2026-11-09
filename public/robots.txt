@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://embeddingviz.tsilva.eu/sitemap.xml
