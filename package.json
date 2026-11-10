@@ -15,29 +15,29 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.2.0",
-    "@sentry/react": "^10.51.0",
+    "@huggingface/transformers": "^4.3.2",
+    "@sentry/react": "^11.10.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vercel/analytics": "^1.6.1",
-    "@vitejs/plugin-react": "^6.0.1",
-    "lucide-react": "^1.14.0",
+    "@vercel/analytics": "^2.0.1",
+    "@vitejs/plugin-react": "^6.2.1",
+    "lucide-react": "^1.66.0",
     "ml-pca": "^4.1.1",
-    "pdfjs-dist": "^6.2.108",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
+    "pdfjs-dist": "^6.5.438",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^6.0.3",
     "umap-js": "^1.4.0",
-    "vite": "^8.3.3"
+    "vite": "^8.3.5"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
-    "@playwright/test": "^1.59.1",
+    "@playwright/test": "^1.64.1",
     "@sentry/vite-plugin": "^5.2.1",
-    "eslint": "9.39.1",
+    "eslint": "10.14.0",
     "globals": "16.4.0",
-    "jsdom": "^29.1.1",
-    "typescript-eslint": "8.66.0",
+    "jsdom": "^30.1.3",
+    "typescript-eslint": "8.72.1",
     "vitest": "^4.1.12"
   },
   "overrides": {
@@ -47,7 +47,9 @@
       },
       "sharp": "0.35.5"
     },
-    "source-map-js": "1.2.2"
+    "source-map-js": "1.2.2",
+    "minimatch@>=7 <11.0.1": "11.0.1",
+    "glob@>=9 <14.0.2": "14.0.2"
   },
   "packageManager": "npm@11.20.0"
 }
