@@ -117,7 +117,7 @@ jobs:
     with:
       project_id: prj_2Nu7WItUtZ7nUkLlQawAdsdi9zyt
       project_name: embeddingviz
-      production_domains: '["embeddingviz.tsilva.eu","embeddingviz.vercel.app"]'
+      production_domains: '["embeddingviz.tsilva.eu"]'
       public_environment: '["VITE_SENTRY_DSN"]'
       promote: ${{ !inputs.stage_prebuilt }}
     secrets:
