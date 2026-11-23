@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   audit:
-    uses: tsilva/.github/.github/workflows/lighthouse-ci.yml@cc4063539653becaf4493e6ece6c95784e3d6c81
+    uses: tsilva/.github/.github/workflows/lighthouse-ci.yml@f2b6527567c3ce54b2ef171735ad1ddfd126461c
     with:
       url: "https://embeddingviz.tsilva.eu/"
       sample_timings: true
