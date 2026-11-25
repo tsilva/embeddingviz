@@ -113,7 +113,7 @@ jobs:
         github.event.workflow_run.path == '.github/workflows/ci.yml' &&
         github.event.workflow_run.repository.id == github.repository_id &&
         github.event.workflow_run.head_repository.id == github.repository_id))
-    uses: tsilva/.github/.github/workflows/vercel-prebuilt.yml@0b3b1d4cb977866ed4875a998755ba9d0cc046a4
+    uses: tsilva/.github/.github/workflows/vercel-prebuilt.yml@f2b6527567c3ce54b2ef171735ad1ddfd126461c
     with:
       project_id: prj_2Nu7WItUtZ7nUkLlQawAdsdi9zyt
       project_name: embeddingviz
